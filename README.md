@@ -3,11 +3,18 @@
 ## Development Setup
 
 This project utilizes Python scripts and a Python virtual environment.
+Python packages are managed using pip.
 
 - Ensure Python 3.8+ is installed:
 
 ```bash
 python -V
+```
+
+- Ensure pip is installed:
+
+```bash
+pip -V
 ```
 
 - Create a virtual environment for the project:
@@ -60,8 +67,8 @@ pip freeze > requirements.txt
 
 ## Data Setup
 
-You need to add your own data sets to use with the Python scripts. Data should be
-placed in the `data` directory that is created within this project.
+You need to add your own data sets to use with the Python scripts. Place
+data files in the `data` directory within this project.
 
 - Create the `data` directory (Linux):
 
@@ -74,8 +81,7 @@ Now, just copy all of your data files to this directory (`.pcap`, `.mmdb`, etc).
 ## Output Setup
 
 The scripts produce output files (`.csv`, `.png`, etc), so a directory is required
-to store these files. Output files should be stored in the `output` directory
-that is created within this project.
+to store these files. Store output files in the `output` directory within this project.
 
 - Create the `output` directory (Linux):
 
@@ -91,7 +97,7 @@ mkdir output
 High-level PCAP summary: total packets, protocol breakdown, time range, top source IPs and destination ports.
 
 ```bash
-python 1_pcap_overview.py
+python 1_pcap_overview.py -p <pcap_file>
 ```
 
 ### Script 2 — `2_ics_port_analysis.py`
@@ -100,7 +106,7 @@ python 1_pcap_overview.py
 ICS/OT port targeting analysis: flags Modbus, DNP3, EtherNet/IP, etc. Measures unique source IPs and detects sequential vs. random scanning patterns.
 
 ```bash
-python 2_ics_port_analysis.py
+python 2_ics_port_analysis.py -p <pcap_file>
 ```
 
 ### Script 3 — `3_entropy_burstiness.py`
@@ -110,7 +116,7 @@ Computes Shannon entropy (src IP, dst port, protocol) and packet rate per 1-minu
 Outputs: `entropy_burstiness.csv`, `entropy_burstiness.png`
 
 ```bash
-python 3_entropy_burstiness.py
+python 3_entropy_burstiness.py -p <pcap_file> -o <output_dir>
 ```
 
 ### Script 4 — `4_geo_analysis.py`
@@ -120,7 +126,7 @@ Maps source IPs to countries using a [MaxMind DB file](https://maxmind.github.io
 Outputs: `geo_country_stats.csv`, `geo_country_bar.png`
 
 ```bash
-python 4_geo_analysis.py
+python 4_geo_analysis.py -p <pcap_file> -m <mmdb_file> -o <output_dir>
 ```
 
 ### Script 5 — `5_heatmap_port_time.py`
@@ -130,7 +136,7 @@ Builds a port-activity heatmap over time for ICS and common scanning ports.
 Outputs: `port_heatmap.png`, `port_heatmap_data.csv`
 
 ```bash
-python 5_heatmap_port_time.py
+python 5_heatmap_port_time.py -p <pcap_file> -o <output_dir>
 ```
 
 ---

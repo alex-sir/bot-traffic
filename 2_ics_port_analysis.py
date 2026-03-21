@@ -4,15 +4,17 @@ Topic - Data Engineering & Feature Extraction
 Flags packets targeting known industrial control system ports and
 reports how many packets hit each ICS-relevant port. Also identifies
 scanning behavior (sequential vs random IP targeting).
+
+Usage:
+    python 2_ics_port_analysis.py -p <pcap_file>
 """
 
-import sys
+import argparse
+import socket
+import struct
 from collections import Counter, defaultdict
 from scapy.all import rdpcap, IP, TCP, UDP
 
-PCAP_FILE = "data/traffic-2025-01-20.00-1M.pcap"
-
-# Known ICS/OT protocol ports
 ICS_PORTS = {
     502: "Modbus",
     20000: "DNP3",
@@ -34,15 +36,26 @@ ICS_PORTS = {
 }
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="ICS/OT Port Targeting Analysis")
+    parser.add_argument(
+        "-p", "--pcap", required=True, help="Path to the input PCAP file"
+    )
+    return parser.parse_args()
+
+
 def main():
-    print(f"[*] Loading {PCAP_FILE} ...")
-    packets = rdpcap(PCAP_FILE)
+    args = parse_args()
+    pcap_file = args.pcap
+
+    print(f"[*] Loading {pcap_file} ...")
+    packets = rdpcap(pcap_file)
     print(f"[+] Total packets: {len(packets)}\n")
 
     ics_hits = Counter()
     non_ics = 0
-    src_per_ics_port = defaultdict(set)  # unique source IPs per ICS port
-    dst_ips_per_port = defaultdict(list)  # dst IPs per ICS port for sequential analysis
+    src_per_ics_port = defaultdict(set)
+    dst_ips_per_port = defaultdict(list)
 
     for pkt in packets:
         if IP not in pkt:
@@ -75,10 +88,7 @@ def main():
         unique_srcs = len(src_per_ics_port[proto])
         print(f"  {proto:<23} {count:>9} {unique_srcs:>15}")
 
-    # Basic sequential scan detection: check if dst IPs per ICS port are numerically sequential
     print("\n[+] Scanning pattern analysis (per ICS port):")
-    import socket, struct
-
     for proto, ips in dst_ips_per_port.items():
         if len(ips) < 5:
             continue

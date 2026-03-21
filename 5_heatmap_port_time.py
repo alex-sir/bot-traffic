@@ -3,9 +3,14 @@ Script 5: Port-over-Time Heatmap (ICS Ports Focus)
 Topic - Statistical Analysis & Visualization
 Creates a heatmap showing activity on key ICS/OT ports across
 1-minute time bins. Rows = ports, Columns = time bins.
+
+Usage:
+    python 5_heatmap_port_time.py -p <pcap_file> -o <output_dir>
 """
 
+import argparse
 import datetime
+import os
 from collections import defaultdict
 
 import numpy as np
@@ -17,10 +22,8 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from scapy.all import rdpcap, IP, TCP, UDP
 
-PCAP_FILE = "data/traffic-2025-01-20.00-1M.pcap"
 BIN_SECS = 60
 
-# Ports to include in heatmap: ICS + common scanning ports for comparison
 PORTS_OF_INTEREST = {
     22: "SSH",
     23: "Telnet",
@@ -39,9 +42,31 @@ PORTS_OF_INTEREST = {
 }
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Port-over-Time Heatmap")
+    parser.add_argument(
+        "-p", "--pcap", required=True, help="Path to the input PCAP file"
+    )
+    parser.add_argument(
+        "-o",
+        "--outdir",
+        default="output",
+        help="Directory for output files (default: output)",
+    )
+    return parser.parse_args()
+
+
 def main():
-    print(f"[*] Loading {PCAP_FILE} ...")
-    packets = rdpcap(PCAP_FILE)
+    args = parse_args()
+    pcap_file = args.pcap
+    outdir = args.outdir
+    os.makedirs(outdir, exist_ok=True)
+
+    output_png = os.path.join(outdir, "port_heatmap.png")
+    output_csv = os.path.join(outdir, "port_heatmap_data.csv")
+
+    print(f"[*] Loading {pcap_file} ...")
+    packets = rdpcap(pcap_file)
     print(f"[+] {len(packets)} packets loaded.\n")
 
     t0 = float(packets[0].time)
@@ -70,8 +95,6 @@ def main():
     matrix = np.array(
         [[port_bins[p].get(b, 0) for b in all_bins] for p in port_keys], dtype=float
     )
-
-    # Log-scale for visibility (add 1 to avoid log(0))
     matrix_log = np.log1p(matrix)
 
     fig, ax = plt.subplots(figsize=(max(12, len(all_bins) // 3), 7))
@@ -85,10 +108,11 @@ def main():
     ax.set_yticks(range(len(port_labels)))
     ax.set_yticklabels(port_labels, fontsize=8)
 
-    # X-axis: every 10th bin labelled
     tick_positions = list(range(0, len(all_bins), max(1, len(all_bins) // 15)))
     tick_labels = [
-        datetime.datetime.utcfromtimestamp(t0 + b * BIN_SECS).strftime("%H:%M")
+        datetime.datetime.fromtimestamp(
+            t0 + b * BIN_SECS, tz=datetime.timezone.utc
+        ).strftime("%H:%M")
         for b in tick_positions
     ]
     ax.set_xticks(tick_positions)
@@ -102,15 +126,14 @@ def main():
     cbar.set_label("log(packets + 1)")
 
     plt.tight_layout()
-    plt.savefig("output/port_heatmap.png", dpi=150)
-    print("[+] Heatmap saved to output/port_heatmap.png")
+    plt.savefig(output_png, dpi=150)
+    print(f"[+] Heatmap saved to {output_png}")
 
-    # Save raw matrix as CSV
     df = pd.DataFrame(
         matrix.astype(int), index=port_labels, columns=[f"bin_{b}" for b in all_bins]
     )
-    df.to_csv("port_heatmap_data.csv")
-    print("[+] Heatmap data saved to port_heatmap_data.csv")
+    df.to_csv(output_csv)
+    print(f"[+] Heatmap data saved to {output_csv}")
 
 
 if __name__ == "__main__":

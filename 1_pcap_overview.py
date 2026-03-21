@@ -2,22 +2,35 @@
 Script 1: PCAP Overview & Basic Statistics
 Topic - Data Engineering & Feature Extraction
 Reads the Merit ORION PCAP file and prints a high-level summary:
-  - Total packet count
-  - Protocol distribution (TCP/UDP/ICMP/Other)
-  - Time range of the capture
-  - Top 10 source IPs and destination ports
+- Total packet count
+- Protocol distribution (TCP/UDP/ICMP/Other)
+- Time range of the capture
+- Top 10 source IPs and destination ports
+
+Usage:
+    python 1_pcap_overview.py -p <pcap_file>
 """
 
-import sys
+import argparse
+import datetime
 from collections import Counter
 from scapy.all import rdpcap, IP, TCP, UDP, ICMP
 
-PCAP_FILE = "data/traffic-2025-01-20.00-1M.pcap"
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="PCAP Overview & Basic Statistics")
+    parser.add_argument(
+        "-p", "--pcap", required=True, help="Path to the input PCAP file"
+    )
+    return parser.parse_args()
 
 
 def main():
-    print(f"[*] Loading {PCAP_FILE} ...")
-    packets = rdpcap(PCAP_FILE)
+    args = parse_args()
+    pcap_file = args.pcap
+
+    print(f"[*] Loading {pcap_file} ...")
+    packets = rdpcap(pcap_file)
     total = len(packets)
     print(f"[+] Total packets: {total}\n")
 
@@ -45,8 +58,6 @@ def main():
             protocols["Non-IP"] += 1
 
     if timestamps:
-        import datetime
-
         t_start = datetime.datetime.fromtimestamp(
             min(timestamps), tz=datetime.timezone.utc
         )

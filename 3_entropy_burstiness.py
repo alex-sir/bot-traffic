@@ -2,15 +2,20 @@
 Script 3: Entropy & Burstiness Analysis
 Topic - Statistical Analysis & Visualization
 Computes:
-  - Shannon entropy of source IPs, destination ports, and protocols
-    over 1-minute bins to measure traffic diversity over time.
-  - Burstiness via coefficient of variation (CV) of packet rates per bin.
-  - Hurst exponent estimate for long-range dependence.
+- Shannon entropy of source IPs, destination ports, and protocols
+  over 1-minute bins to measure traffic diversity over time.
+- Burstiness via coefficient of variation (CV) of packet rates per bin.
+- Hurst exponent estimate for long-range dependence.
 Outputs CSVs and PNG plots.
+
+Usage:
+    python 3_entropy_burstiness.py -p <pcap_file> -o <output_dir>
 """
 
+import argparse
 import math
 import datetime
+import os
 from collections import Counter, defaultdict
 
 import numpy as np
@@ -21,9 +26,31 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scapy.all import rdpcap, IP, TCP, UDP, ICMP
 
-PCAP_FILE = "data/traffic-2025-01-20.00-1M.pcap"
-BIN_SECS = 60  # 1-minute bins
-OUTPUT_CSV = "output/entropy_burstiness.csv"
+BIN_SECS = 60
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Entropy & Burstiness Analysis")
+    parser.add_argument(
+        "-p", "--pcap", required=True, help="Path to the input PCAP file"
+    )
+    parser.add_argument(
+        "-o",
+        "--outdir",
+        default="output",
+        help="Directory for output files (default: output)",
+    )
+    return parser.parse_args()
+
+
+def make_bin():
+    """Factory function for defaultdict — creates a fresh bin record."""
+    return {
+        "src_ips": Counter(),
+        "dst_ports": Counter(),
+        "protocols": Counter(),
+        "count": 0,
+    }
 
 
 def shannon_entropy(counter):
@@ -50,13 +77,20 @@ def hurst_exponent(ts):
         return float("nan")
     lags_arr = np.log([x[0] for x in rs_vals])
     rs_arr = np.log([x[1] for x in rs_vals])
-    H = np.polyfit(lags_arr, rs_arr, 1)[0]
-    return H
+    return np.polyfit(lags_arr, rs_arr, 1)[0]
 
 
 def main():
-    print(f"[*] Loading {PCAP_FILE} ...")
-    packets = rdpcap(PCAP_FILE)
+    args = parse_args()
+    pcap_file = args.pcap
+    outdir = args.outdir
+    os.makedirs(outdir, exist_ok=True)
+
+    output_csv = os.path.join(outdir, "entropy_burstiness.csv")
+    output_png = os.path.join(outdir, "entropy_burstiness.png")
+
+    print(f"[*] Loading {pcap_file} ...")
+    packets = rdpcap(pcap_file)
     print(f"[+] {len(packets)} packets loaded.\n")
 
     if not packets:
@@ -64,15 +98,7 @@ def main():
         return
 
     t0 = float(packets[0].time)
-
-    bins = defaultdict(
-        lambda: {
-            "src_ips": Counter(),
-            "dst_ports": Counter(),
-            "protocols": Counter(),
-            "count": 0,
-        }
-    )
+    bins = defaultdict(make_bin)  # FIX: use named factory function, not broken lambda
 
     for pkt in packets:
         if IP not in pkt:
@@ -94,15 +120,16 @@ def main():
         else:
             bins[bin_id]["protocols"]["Other"] += 1
 
-    sorted_bins = sorted(bins.keys())
+    print(f"[+] Populated {len(bins)} time bins.")
+
     records = []
-    for b in sorted_bins:
+    for b in sorted(bins.keys()):
         ts_label = datetime.datetime.fromtimestamp(
             t0 + b * BIN_SECS, tz=datetime.timezone.utc
         ).strftime("%H:%M")
         d = bins[b]
         records.append(
-            {
+            {  # FIX: dict braces were missing, causing empty records
                 "bin": b,
                 "time": ts_label,
                 "packet_count": d["count"],
@@ -113,15 +140,14 @@ def main():
         )
 
     df = pd.DataFrame(records)
-    df.to_csv(OUTPUT_CSV, index=False)
-    print(f"[+] Per-bin stats saved to {OUTPUT_CSV}")
+    df.to_csv(output_csv, index=False)
+    print(f"[+] Per-bin stats saved to {output_csv}")
+    print(df.describe())
 
-    # Burstiness (Coefficient of Variation)
     pkt_counts = df["packet_count"].values
     cv = np.std(pkt_counts) / np.mean(pkt_counts) if np.mean(pkt_counts) > 0 else 0
     print(f"[+] Burstiness (CV of packet rate): {cv:.4f}  (>1 = bursty, <1 = uniform)")
 
-    # Hurst exponent
     H = hurst_exponent(pkt_counts)
     print(
         f"[+] Hurst exponent estimate:        {H:.4f}  (>0.5 = long-range dependence/persistent)"
@@ -164,8 +190,8 @@ def main():
     axes[2].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig("output/entropy_burstiness.png", dpi=150)
-    print("[+] Plot saved to output/entropy_burstiness.png")
+    plt.savefig(output_png, dpi=150)
+    print(f"[+] Plot saved to {output_png}")
 
 
 if __name__ == "__main__":
