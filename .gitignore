@@ -1,0 +1,6 @@
+# Python virtual environments
+.venv/
+venv/
+
+# Data files (.pcap, .mmdb, etc.)
+data/
