@@ -47,8 +47,12 @@ def main():
     if timestamps:
         import datetime
 
-        t_start = datetime.datetime.utcfromtimestamp(min(timestamps))
-        t_end = datetime.datetime.utcfromtimestamp(max(timestamps))
+        t_start = datetime.datetime.fromtimestamp(
+            min(timestamps), tz=datetime.timezone.utc
+        )
+        t_end = datetime.datetime.fromtimestamp(
+            max(timestamps), tz=datetime.timezone.utc
+        )
         duration = max(timestamps) - min(timestamps)
         print(f"[+] Capture start (UTC): {t_start}")
         print(f"[+] Capture end   (UTC): {t_end}")

@@ -22,8 +22,8 @@ except ImportError:
     print("[!] Install maxminddb-reader-python:  pip install maxminddb")
     sys.exit(1)
 
-PCAP_FILE = "traffic-2025-01-20.00-1M.pcap"
-MMDB_FILE = "GeoLite2-Country.mmdb"
+PCAP_FILE = "data/traffic-2025-01-20.00-1M.pcap"
+MMDB_FILE = "data/GeoLite2-Country.mmdb"
 TOP_N = 20
 
 
@@ -69,8 +69,8 @@ def main():
         )
 
     df = pd.DataFrame(rows)
-    df.to_csv("geo_country_stats.csv", index=False)
-    print(f"[+] GeoIP results saved to geo_country_stats.csv\n")
+    df.to_csv("output/geo_country_stats.csv", index=False)
+    print("[+] GeoIP results saved to output/geo_country_stats.csv\n")
 
     total = sum(country_pkt_count.values())
     print(f"{'Country':<30} {'Packets':>10} {'%':>7}  {'Unique IPs':>12}")

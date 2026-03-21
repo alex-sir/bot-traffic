@@ -4,3 +4,6 @@ venv/
 
 # Data files (.pcap, .mmdb, etc.)
 data/
+
+# Output files (.csv, .png, etc)
+output/

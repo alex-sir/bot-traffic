@@ -10,7 +10,7 @@ import sys
 from collections import Counter, defaultdict
 from scapy.all import rdpcap, IP, TCP, UDP
 
-PCAP_FILE = "traffic-2025-01-20.00-1M.pcap"
+PCAP_FILE = "data/traffic-2025-01-20.00-1M.pcap"
 
 # Known ICS/OT protocol ports
 ICS_PORTS = {

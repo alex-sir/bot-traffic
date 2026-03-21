@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from scapy.all import rdpcap, IP, TCP, UDP
 
-PCAP_FILE = "traffic-2025-01-20.00-1M.pcap"
+PCAP_FILE = "data/traffic-2025-01-20.00-1M.pcap"
 BIN_SECS = 60
 
 # Ports to include in heatmap: ICS + common scanning ports for comparison
@@ -102,8 +102,8 @@ def main():
     cbar.set_label("log(packets + 1)")
 
     plt.tight_layout()
-    plt.savefig("port_heatmap.png", dpi=150)
-    print("[+] Heatmap saved to port_heatmap.png")
+    plt.savefig("output/port_heatmap.png", dpi=150)
+    print("[+] Heatmap saved to output/port_heatmap.png")
 
     # Save raw matrix as CSV
     df = pd.DataFrame(

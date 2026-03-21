@@ -21,9 +21,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scapy.all import rdpcap, IP, TCP, UDP, ICMP
 
-PCAP_FILE = "traffic-2025-01-20.00-1M.pcap"
+PCAP_FILE = "data/traffic-2025-01-20.00-1M.pcap"
 BIN_SECS = 60  # 1-minute bins
-OUTPUT_CSV = "entropy_burstiness.csv"
+OUTPUT_CSV = "output/entropy_burstiness.csv"
 
 
 def shannon_entropy(counter):
@@ -97,9 +97,9 @@ def main():
     sorted_bins = sorted(bins.keys())
     records = []
     for b in sorted_bins:
-        ts_label = datetime.datetime.utcfromtimestamp(t0 + b * BIN_SECS).strftime(
-            "%H:%M"
-        )
+        ts_label = datetime.datetime.fromtimestamp(
+            t0 + b * BIN_SECS, tz=datetime.timezone.utc
+        ).strftime("%H:%M")
         d = bins[b]
         records.append(
             {
@@ -164,8 +164,8 @@ def main():
     axes[2].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig("entropy_burstiness.png", dpi=150)
-    print("[+] Plot saved to entropy_burstiness.png")
+    plt.savefig("output/entropy_burstiness.png", dpi=150)
+    print("[+] Plot saved to output/entropy_burstiness.png")
 
 
 if __name__ == "__main__":

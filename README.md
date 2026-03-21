@@ -61,7 +61,7 @@ pip freeze > requirements.txt
 ## Data Setup
 
 You need to add your own data sets to use with the Python scripts. Data should be
-placed in a `data` directory that is created within this project.
+placed in the `data` directory that is created within this project.
 
 - Create the `data` directory (Linux):
 
@@ -70,6 +70,18 @@ mkdir data
 ```
 
 Now, just copy all of your data files to this directory (`.pcap`, `.mmdb`, etc).
+
+## Output Setup
+
+The scripts produce output files (`.csv`, `.png`, etc), so a directory is required
+to store these files. Output files should be stored in the `output` directory
+that is created within this project.
+
+- Create the `output` directory (Linux):
+
+```bash
+mkdir output
+```
 
 ## Scripts
 
