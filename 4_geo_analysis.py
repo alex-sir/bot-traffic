@@ -1,19 +1,26 @@
 """
-Script 4: GeoIP Country Analysis with GeoLite2-Country.mmdb
-Topic - Statistical Analysis & Visualization
-Uses the MaxMind GeoLite2-Country database to map source IPs
-to countries. Reports top countries by packet count and unique IPs,
-and produces a bar chart.
+Script 4: GeoIP Country Analysis
 
-Usage:
-    python 4_geo_analysis.py -p <pcap_file> -m <mmdb_file> -o <output_dir>
+This script maps source IP addresses to their respective countries using
+the MaxMind GeoLite2 database. It generates a high-resolution horizontal
+bar chart showing the top source countries by packet volume, including
+annotations for the number of unique IPs per country.
+
+Usage Instructions:
+    Run the script from the terminal, providing both the path to your PCAP
+    file and the path to the MaxMind GeoLite2-Country.mmdb file.
+
+    Basic usage:
+        python 4_geo_analysis.py -p <path_to_pcap_file> -m <path_to_mmdb_file>
+
+    Example with custom output directory:
+        python 4_geo_analysis.py -p data/traffic.pcap -m data/GeoLite2-Country.mmdb -o output/
 """
 
 import argparse
 import os
 import sys
 from collections import Counter, defaultdict
-
 import pandas as pd
 import matplotlib
 
@@ -27,33 +34,37 @@ except ImportError:
     print("[!] Install maxminddb-reader-python:  pip install maxminddb")
     sys.exit(1)
 
-TOP_N = 20
+plt.rcParams.update(
+    {
+        "font.size": 18,
+        "font.family": "serif",
+        "axes.labelsize": 20,
+        "axes.titlesize": 24,
+        "ytick.labelsize": 18,
+        "figure.dpi": 300,
+    }
+)
+
+TOP_N = 15  # Kept at 15 to ensure Y-axis text has plenty of breathing room
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="GeoIP Country Analysis")
+    parser.add_argument("-p", "--pcap", required=True, help="Path to input PCAP")
     parser.add_argument(
-        "-p", "--pcap", required=True, help="Path to the input PCAP file"
+        "-m", "--mmdb", required=True, help="Path to GeoLite2-Country.mmdb"
     )
-    parser.add_argument(
-        "-m", "--mmdb", required=True, help="Path to the GeoLite2-Country.mmdb file"
-    )
-    parser.add_argument(
-        "-o",
-        "--outdir",
-        default="output",
-        help="Directory for output files (default: output)",
-    )
+    parser.add_argument("-o", "--outdir", default="output", help="Output directory")
     return parser.parse_args()
 
 
 def lookup_country(reader, ip):
     try:
-        result = reader.get(ip)
-        if result and "country" in result:
-            return result["country"].get("names", {}).get("en", "Unknown")
-        if result and "registered_country" in result:
-            return result["registered_country"].get("names", {}).get("en", "Unknown")
+        res = reader.get(ip)
+        if res and "country" in res:
+            return res["country"].get("names", {}).get("en", "Unknown")
+        if res and "registered_country" in res:
+            return res["registered_country"].get("names", {}).get("en", "Unknown")
     except Exception:
         pass
     return "Unknown"
@@ -61,62 +72,78 @@ def lookup_country(reader, ip):
 
 def main():
     args = parse_args()
-    pcap_file = args.pcap
-    mmdb_file = args.mmdb
-    outdir = args.outdir
-    os.makedirs(outdir, exist_ok=True)
+    os.makedirs(args.outdir, exist_ok=True)
+    out_png = os.path.join(args.outdir, "geo_country_bar.png")
 
-    output_csv = os.path.join(outdir, "geo_country_stats.csv")
-    output_png = os.path.join(outdir, "geo_country_bar.png")
+    print(f"[*] Loading {args.pcap} ...")
+    packets = rdpcap(args.pcap)
 
-    print(f"[*] Loading {pcap_file} ...")
-    packets = rdpcap(pcap_file)
-    print(f"[+] {len(packets)} packets loaded.\n")
+    print(f"[*] Opening GeoIP database: {args.mmdb}")
+    try:
+        reader = maxminddb.open_database(args.mmdb)
+    except FileNotFoundError:
+        print(f"[-] Could not find MMDB file at {args.mmdb}")
+        return
 
-    print(f"[*] Opening GeoIP database: {mmdb_file}")
-    reader = maxminddb.open_database(mmdb_file)
-
-    country_pkt_count = Counter()
-    country_ip_count = defaultdict(set)
+    country_pkt = Counter()
+    country_ip = defaultdict(set)
 
     for pkt in packets:
         if IP not in pkt:
             continue
         src = pkt[IP].src
-        country = lookup_country(reader, src)
-        country_pkt_count[country] += 1
-        country_ip_count[country].add(src)
+        c = lookup_country(reader, src)
+        country_pkt[c] += 1
+        country_ip[c].add(src)
 
     reader.close()
 
-    rows = []
-    for country, pkt_count in country_pkt_count.most_common(TOP_N):
-        unique_ips = len(country_ip_count[country])
-        rows.append(
-            {"country": country, "packets": pkt_count, "unique_src_ips": unique_ips}
+    if not country_pkt:
+        print("[-] No valid IP traffic found to map.")
+        return
+
+    rows = [
+        {"country": c, "packets": p, "unique_ips": len(country_ip[c])}
+        for c, p in country_pkt.most_common(TOP_N)
+    ]
+
+    df = pd.DataFrame(rows).sort_values(by="packets", ascending=True)
+
+    # --- Plotting ---
+    # Widened figure to 14 inches to accommodate the larger annotation text
+    fig, ax = plt.subplots(figsize=(14, 10))
+
+    bars = ax.barh(
+        df["country"], df["packets"], color="#4C72B0", edgecolor="black", alpha=0.9
+    )
+
+    ax.set_xlabel("Total Packet Count", labelpad=15, fontweight="bold")
+    ax.set_title(f"Top Source Countries by Packet Volume", pad=20, fontweight="bold")
+    ax.grid(axis="x", linestyle="--", alpha=0.5)
+
+    # Add large text annotations on the bars
+    for bar, u_ips in zip(bars, df["unique_ips"]):
+        width = bar.get_width()
+
+        # Annotation text: "  X pkts | Y IPs"
+        annotation = f"  {int(width):,} pkts | {u_ips:,} IPs"
+
+        ax.text(
+            width,
+            bar.get_y() + bar.get_height() / 2,
+            annotation,
+            va="center",
+            ha="left",
+            fontsize=16,
+            color="black",
         )
 
-    df = pd.DataFrame(rows)
-    df.to_csv(output_csv, index=False)
-    print(f"[+] GeoIP results saved to {output_csv}\n")
+    # Extend x-limit heavily to ensure the large text labels fit inside the graphic bounds
+    ax.set_xlim(0, max(df["packets"]) * 1.45)
 
-    total = sum(country_pkt_count.values())
-    print(f"{'Country':<30} {'Packets':>10} {'%':>7}  {'Unique IPs':>12}")
-    print("-" * 65)
-    for _, row in df.iterrows():
-        pct = 100 * row["packets"] / total
-        print(
-            f"  {row['country']:<28} {row['packets']:>10} {pct:>6.1f}%  {row['unique_src_ips']:>12}"
-        )
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.barh(df["country"][::-1], df["packets"][::-1], color="steelblue")
-    ax.set_xlabel("Packet Count")
-    ax.set_title(f"Top {TOP_N} Source Countries – Merit ORION Telescope")
-    ax.grid(axis="x", alpha=0.3)
     plt.tight_layout()
-    plt.savefig(output_png, dpi=150)
-    print(f"[+] Chart saved to {output_png}")
+    plt.savefig(out_png, dpi=300, bbox_inches="tight")
+    print(f"[+] Geo mapping chart saved to {out_png}")
 
 
 if __name__ == "__main__":

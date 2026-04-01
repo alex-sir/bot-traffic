@@ -1,197 +1,220 @@
 """
-Script 3: Entropy & Burstiness Analysis
-Topic - Statistical Analysis & Visualization
-Computes:
-- Shannon entropy of source IPs, destination ports, and protocols
-  over 1-minute bins to measure traffic diversity over time.
-- Burstiness via coefficient of variation (CV) of packet rates per bin.
-- Hurst exponent estimate for long-range dependence.
-Outputs CSVs and PNG plots.
+Script 3: Global Entropy & Inter-Arrival Time (Burstiness) Analysis
 
-Usage:
-    python 3_entropy_burstiness.py -p <pcap_file> -o <output_dir>
+This script calculates mathematically reliable metrics for network telescope traffic:
+1. Global Shannon Entropy for Source IPs and Destination Ports.
+2. Inter-Arrival Time (IAT) between packets to determine traffic burstiness.
+
+It outputs TWO separate, high-resolution, graphs.
+
+Usage Instructions:
+    Run the script from the terminal, providing the path to your PCAP file.
+
+    Basic usage:
+        python 3_entropy_burstiness.py -p <path_to_pcap_file>
+
+    Example with custom output directory:
+        python 3_entropy_burstiness.py -p data/traffic.pcap -o output/
 """
 
 import argparse
 import math
-import datetime
 import os
-from collections import Counter, defaultdict
-
+from collections import Counter
 import numpy as np
-import pandas as pd
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from scapy.all import rdpcap, IP, TCP, UDP, ICMP
+from scapy.all import rdpcap, IP, TCP, UDP
 
-BIN_SECS = 60
+plt.rcParams.update(
+    {
+        "font.size": 20,
+        "font.family": "serif",
+        "axes.labelsize": 22,
+        "axes.titlesize": 26,
+        "xtick.labelsize": 18,
+        "ytick.labelsize": 18,
+        "legend.fontsize": 18,
+        "figure.dpi": 300,
+    }
+)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Entropy & Burstiness Analysis")
-    parser.add_argument(
-        "-p", "--pcap", required=True, help="Path to the input PCAP file"
+    parser = argparse.ArgumentParser(
+        description="Reliable Entropy & Burstiness Analysis"
     )
-    parser.add_argument(
-        "-o",
-        "--outdir",
-        default="output",
-        help="Directory for output files (default: output)",
-    )
+    parser.add_argument("-p", "--pcap", required=True, help="Path to input PCAP")
+    parser.add_argument("-o", "--outdir", default="output", help="Output directory")
     return parser.parse_args()
 
 
-def make_bin():
-    """Factory function for defaultdict — creates a fresh bin record."""
-    return {
-        "src_ips": Counter(),
-        "dst_ports": Counter(),
-        "protocols": Counter(),
-        "count": 0,
-    }
-
-
-def shannon_entropy(counter):
+def calc_entropy(counter):
+    """Calculates actual Shannon Entropy and Theoretical Maximum Entropy."""
     total = sum(counter.values())
-    if total == 0:
-        return 0.0
-    return -sum((c / total) * math.log2(c / total) for c in counter.values() if c > 0)
+    unique_count = len(counter)
+    if total == 0 or unique_count == 0:
+        return 0.0, 0.0
 
-
-def hurst_exponent(ts):
-    """R/S analysis estimate of Hurst exponent."""
-    ts = np.array(ts, dtype=float)
-    lags = range(2, max(3, len(ts) // 2))
-    rs_vals = []
-    for lag in lags:
-        sub = ts[:lag]
-        mean = np.mean(sub)
-        dev = np.cumsum(sub - mean)
-        R = np.max(dev) - np.min(dev)
-        S = np.std(sub)
-        if S > 0:
-            rs_vals.append((lag, R / S))
-    if len(rs_vals) < 2:
-        return float("nan")
-    lags_arr = np.log([x[0] for x in rs_vals])
-    rs_arr = np.log([x[1] for x in rs_vals])
-    return np.polyfit(lags_arr, rs_arr, 1)[0]
+    entropy = -sum(
+        (c / total) * math.log2(c / total) for c in counter.values() if c > 0
+    )
+    max_entropy = math.log2(unique_count)
+    return entropy, max_entropy
 
 
 def main():
     args = parse_args()
-    pcap_file = args.pcap
-    outdir = args.outdir
-    os.makedirs(outdir, exist_ok=True)
+    os.makedirs(args.outdir, exist_ok=True)
+    out_entropy = os.path.join(args.outdir, "entropy_diversity.png")
+    out_burst = os.path.join(args.outdir, "burstiness_iat.png")
 
-    output_csv = os.path.join(outdir, "entropy_burstiness.csv")
-    output_png = os.path.join(outdir, "entropy_burstiness.png")
-
-    print(f"[*] Loading {pcap_file} ...")
-    packets = rdpcap(pcap_file)
-    print(f"[+] {len(packets)} packets loaded.\n")
-
-    if not packets:
-        print("No packets found.")
+    print(f"[*] Loading {args.pcap} ...")
+    packets = rdpcap(args.pcap)
+    if len(packets) < 2:
+        print("[-] Not enough packets to analyze burstiness.")
         return
 
-    t0 = float(packets[0].time)
-    bins = defaultdict(make_bin)  # FIX: use named factory function, not broken lambda
+    src_ips = Counter()
+    dst_ports = Counter()
+    timestamps = []
 
+    # 1. Extract Data
     for pkt in packets:
-        if IP not in pkt:
-            continue
-        t = float(pkt.time)
-        bin_id = int((t - t0) / BIN_SECS)
+        timestamps.append(float(pkt.time))
+        if IP in pkt:
+            src_ips[pkt[IP].src] += 1
+            if TCP in pkt:
+                dst_ports[pkt[TCP].dport] += 1
+            elif UDP in pkt:
+                dst_ports[pkt[UDP].dport] += 1
 
-        bins[bin_id]["src_ips"][pkt[IP].src] += 1
-        bins[bin_id]["count"] += 1
+    # 2. Calculate Inter-Arrival Times (Burstiness)
+    timestamps.sort()
+    iats = np.diff(timestamps)
 
-        if TCP in pkt:
-            bins[bin_id]["dst_ports"][pkt[TCP].dport] += 1
-            bins[bin_id]["protocols"]["TCP"] += 1
-        elif UDP in pkt:
-            bins[bin_id]["dst_ports"][pkt[UDP].dport] += 1
-            bins[bin_id]["protocols"]["UDP"] += 1
-        elif ICMP in pkt:
-            bins[bin_id]["protocols"]["ICMP"] += 1
-        else:
-            bins[bin_id]["protocols"]["Other"] += 1
+    mean_iat = np.mean(iats)
+    std_iat = np.std(iats)
+    cv_iat = std_iat / mean_iat if mean_iat > 0 else 0
 
-    print(f"[+] Populated {len(bins)} time bins.")
+    # 3. Calculate Global Entropy
+    ip_ent, ip_max = calc_entropy(src_ips)
+    port_ent, port_max = calc_entropy(dst_ports)
 
-    records = []
-    for b in sorted(bins.keys()):
-        ts_label = datetime.datetime.fromtimestamp(
-            t0 + b * BIN_SECS, tz=datetime.timezone.utc
-        ).strftime("%H:%M")
-        d = bins[b]
-        records.append(
-            {  # FIX: dict braces were missing, causing empty records
-                "bin": b,
-                "time": ts_label,
-                "packet_count": d["count"],
-                "src_ip_entropy": round(shannon_entropy(d["src_ips"]), 4),
-                "dst_port_entropy": round(shannon_entropy(d["dst_ports"]), 4),
-                "protocol_entropy": round(shannon_entropy(d["protocols"]), 4),
-            }
+    # --- Print Hard Numbers to Terminal ---
+    print("\n--- Reliable Traffic Metrics ---")
+    print(f"Total Packets:     {len(packets):,}")
+    print(f"Mean IAT:          {mean_iat:.5f} seconds")
+    print(f"IAT Variance (CV): {cv_iat:.3f} (>1 is Bursty)")
+    print(f"Source IP Entropy: {ip_ent:.3f} bits (Max: {ip_max:.3f})")
+    print(f"Dest Port Entropy: {port_ent:.3f} bits (Max: {port_max:.3f})\n")
+
+    # ==========================================
+    # GRAPH 1: Entropy (Traffic Diversity)
+    # ==========================================
+    fig1, ax1 = plt.subplots(figsize=(10, 8))
+
+    labels = ["Source IPs", "Destination Ports"]
+    actual_vals = [ip_ent, port_ent]
+    max_vals = [ip_max, port_max]
+
+    x = np.arange(len(labels))
+    width = 0.35
+
+    ax1.bar(
+        x - width / 2,
+        actual_vals,
+        width,
+        label="Actual Entropy",
+        color="#4C72B0",
+        edgecolor="black",
+        linewidth=1.5,
+    )
+    ax1.bar(
+        x + width / 2,
+        max_vals,
+        width,
+        label="Theoretical Max",
+        color="#DDDDDD",
+        edgecolor="black",
+        hatch="//",
+        linewidth=1.5,
+    )
+
+    ax1.set_ylabel("Shannon Entropy (Bits)", fontweight="bold", labelpad=15)
+    ax1.set_title("Traffic Diversity (Actual vs. Maximum)", pad=20, fontweight="bold")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(labels, fontweight="bold")
+    ax1.grid(axis="y", linestyle="--", alpha=0.7)
+
+    ax1.set_ylim(0, max(max_vals) * 1.35)
+
+    ax1.legend(loc="upper right", framealpha=0.9, edgecolor="black", borderpad=0.8)
+
+    # Add large numeric annotations to the bars
+    for i, v in enumerate(actual_vals):
+        ax1.text(
+            i - width / 2,
+            v + (max(max_vals) * 0.02),
+            f"{v:.2f}",
+            ha="center",
+            va="bottom",
+            fontweight="bold",
+            fontsize=18,
+        )
+    for i, v in enumerate(max_vals):
+        ax1.text(
+            i + width / 2,
+            v + (max(max_vals) * 0.02),
+            f"{v:.2f}",
+            ha="center",
+            va="bottom",
+            color="#555555",
+            fontsize=18,
         )
 
-    df = pd.DataFrame(records)
-    df.to_csv(output_csv, index=False)
-    print(f"[+] Per-bin stats saved to {output_csv}")
-    print(df.describe())
+    plt.tight_layout()
+    plt.savefig(out_entropy, dpi=300, bbox_inches="tight")
+    print(f"[+] Entropy graph saved to {out_entropy}")
+    plt.close(fig1)
 
-    pkt_counts = df["packet_count"].values
-    cv = np.std(pkt_counts) / np.mean(pkt_counts) if np.mean(pkt_counts) > 0 else 0
-    print(f"[+] Burstiness (CV of packet rate): {cv:.4f}  (>1 = bursty, <1 = uniform)")
+    # ==========================================
+    # GRAPH 2: Burstiness (Inter-Arrival Time)
+    # ==========================================
+    fig2, ax2 = plt.subplots(figsize=(12, 8))
 
-    H = hurst_exponent(pkt_counts)
-    print(
-        f"[+] Hurst exponent estimate:        {H:.4f}  (>0.5 = long-range dependence/persistent)"
+    iats_ms = iats * 1000
+    bins = np.logspace(np.log10(max(0.001, min(iats_ms))), np.log10(max(iats_ms)), 50)
+
+    ax2.hist(
+        iats_ms,
+        bins=bins,
+        color="#C44E52",
+        edgecolor="black",
+        alpha=0.85,
+        linewidth=1.2,
     )
 
-    # --- Plots ---
-    fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
-    fig.suptitle(
-        "Merit ORION Telescope Traffic – Entropy & Packet Rate over Time", fontsize=13
-    )
+    ax2.set_xscale("log")
+    ax2.set_yscale("log")
 
-    axes[0].plot(df["bin"], df["packet_count"], color="steelblue", linewidth=0.8)
-    axes[0].set_ylabel("Packets / min")
-    axes[0].set_title(f"Packet Rate  (CV={cv:.2f})")
-    axes[0].grid(True, alpha=0.3)
-
-    axes[1].plot(
-        df["bin"],
-        df["src_ip_entropy"],
-        color="darkorange",
-        linewidth=0.8,
-        label="Src IP",
+    ax2.set_xlabel(
+        "Time Between Packets (Milliseconds, Log Scale)", fontweight="bold", labelpad=15
     )
-    axes[1].plot(
-        df["bin"],
-        df["dst_port_entropy"],
-        color="green",
-        linewidth=0.8,
-        label="Dst Port",
-    )
-    axes[1].set_ylabel("Shannon Entropy (bits)")
-    axes[1].set_title("Traffic Entropy")
-    axes[1].legend()
-    axes[1].grid(True, alpha=0.3)
+    ax2.set_ylabel("Frequency (Log Scale)", fontweight="bold", labelpad=15)
 
-    axes[2].plot(df["bin"], df["protocol_entropy"], color="purple", linewidth=0.8)
-    axes[2].set_ylabel("Protocol Entropy")
-    axes[2].set_xlabel("Time bin (each = 1 min)")
-    axes[2].set_title("Protocol Distribution Entropy")
-    axes[2].grid(True, alpha=0.3)
+    burst_text = f"Burstiness (CV): {cv_iat:.2f} | Mean Gap: {mean_iat * 1000:.1f} ms"
+    ax2.set_title(
+        f"Inter-Arrival Time Distribution\n[{burst_text}]", pad=20, fontweight="bold"
+    )
+    ax2.grid(True, linestyle=":", alpha=0.7)
 
     plt.tight_layout()
-    plt.savefig(output_png, dpi=150)
-    print(f"[+] Plot saved to {output_png}")
+    plt.savefig(out_burst, dpi=300, bbox_inches="tight")
+    print(f"[+] Burstiness graph saved to {out_burst}")
+    plt.close(fig2)
 
 
 if __name__ == "__main__":
