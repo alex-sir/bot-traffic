@@ -1,4 +1,4 @@
-# Characterizing the Impact of AI-Generated and Automated Bot Traffic on Network Behavior and Security
+# Characterizing Automated Bot Traffic Patterns in Darknet Data: Implications for ICS/OT Security Monitoring
 
 ## Development Setup
 
@@ -80,7 +80,7 @@ Now, just copy all of your data files to this directory (`.pcap`, `.mmdb`, etc).
 
 ## Output Setup
 
-The scripts produce output files (`.csv`, `.png`, etc), so a directory is required
+The scripts produce output files (`.png`, `.csv`), so a directory is required
 to store these files. Store output files in the `output` directory within this project.
 
 - Create the `output` directory (Linux):
@@ -94,26 +94,28 @@ mkdir output
 ### Script 1 — `1_pcap_overview.py`
 
 **Topic: Data Engineering**
-High-level PCAP summary: total packets, protocol breakdown, time range, top source IPs and destination ports.
+Reads the PCAP file and produces a single, high-quality table summarizing core metrics of the network traffic, including data volume, average packet rates, and protocol distribution.
+**Outputs:** `pcap_overview_table.png`
 
 ```bash
-python 1_pcap_overview.py -p <pcap_file>
+python 1_pcap_overview.py -p <pcap_file> -o <output_dir>
 ```
 
 ### Script 2 — `2_ics_port_analysis.py`
 
 **Topic: Data Engineering**
-ICS/OT port targeting analysis: flags Modbus, DNP3, EtherNet/IP, etc. Measures unique source IPs and detects sequential vs. random scanning patterns.
+Identifies traffic targeting known Industrial Control System (ICS) ports and determines the scanning pattern (Sequential vs. Random) based on destination IP gaps. Produces an annotated horizontal bar chart.
+**Outputs:** `ics_port_analysis.png`
 
 ```bash
-python 2_ics_port_analysis.py -p <pcap_file>
+python 2_ics_port_analysis.py -p <pcap_file> -o <output_dir>
 ```
 
 ### Script 3 — `3_entropy_burstiness.py`
 
 **Topic: Statistical Analysis**
-Computes Shannon entropy (src IP, dst port, protocol) and packet rate per 1-minute bin. Calculates burstiness (CV) and Hurst exponent.
-Outputs: `entropy_burstiness.csv`, `entropy_burstiness.png`
+Calculates mathematically reliable metrics for network telescope traffic. Computes global Shannon Entropy for Source IPs/Destination Ports and Inter-Arrival Time (IAT) to determine traffic burstiness.
+**Outputs:** `entropy_diversity.png`, `burstiness_iat.png`
 
 ```bash
 python 3_entropy_burstiness.py -p <pcap_file> -o <output_dir>
@@ -122,8 +124,8 @@ python 3_entropy_burstiness.py -p <pcap_file> -o <output_dir>
 ### Script 4 — `4_geo_analysis.py`
 
 **Topic: Statistical Analysis**
-Maps source IPs to countries using a [MaxMind DB file](https://maxmind.github.io/MaxMind-DB). Produces top-20 country table and bar chart.
-Outputs: `geo_country_stats.csv`, `geo_country_bar.png`
+Maps source IPs to countries using a [MaxMind DB file](https://maxmind.github.io/MaxMind-DB). Produces a high-resolution horizontal bar chart annotated with total packet counts and unique IPs per country.
+**Outputs:** `geo_country_bar.png`
 
 ```bash
 python 4_geo_analysis.py -p <pcap_file> -m <mmdb_file> -o <output_dir>
@@ -132,8 +134,8 @@ python 4_geo_analysis.py -p <pcap_file> -m <mmdb_file> -o <output_dir>
 ### Script 5 — `5_heatmap_port_time.py`
 
 **Topic: Statistical Analysis**
-Builds a port-activity heatmap over time for ICS and common scanning ports.
-Outputs: `port_heatmap.png`, `port_heatmap_data.csv`
+Builds an explicitly defined, high-resolution matrix heatmap showing packet activity on key ICS/OT ports across 1-minute time bins.
+**Outputs:** `port_heatmap_matrix.png`, `port_heatmap_data.csv`
 
 ```bash
 python 5_heatmap_port_time.py -p <pcap_file> -o <output_dir>
@@ -143,14 +145,15 @@ python 5_heatmap_port_time.py -p <pcap_file> -o <output_dir>
 
 ## Output Files Summary
 
-| File                   | Produced by |
-| ---------------------- | ----------- |
-| entropy_burstiness.csv | Script 3    |
-| entropy_burstiness.png | Script 3    |
-| geo_country_stats.csv  | Script 4    |
-| geo_country_bar.png    | Script 4    |
-| port_heatmap.png       | Script 5    |
-| port_heatmap_data.csv  | Script 5    |
+| File                      | Produced by | Description                                      |
+| ------------------------- | ----------- | ------------------------------------------------ |
+| `pcap_overview_table.png` | Script 1    | Core metrics and basic statistics summary table  |
+| `ics_port_analysis.png`   | Script 2    | ICS port targeting and scanning pattern chart    |
+| `entropy_diversity.png`   | Script 3    | Global Shannon entropy chart (Actual vs Maximum) |
+| `burstiness_iat.png`      | Script 3    | Inter-Arrival Time (IAT) distribution histogram  |
+| `geo_country_bar.png`     | Script 4    | Top source countries bar chart with IP counts    |
+| `port_heatmap_matrix.png` | Script 5    | Annotated ICS port activity matrix               |
+| `port_heatmap_data.csv`   | Script 5    | Raw CSV data for the heatmap matrix              |
 
 ---
 
