@@ -107,9 +107,9 @@ def main():
     matrix_log = np.log1p(matrix)
 
     # --- Plotting ---
-    # Width scales dynamically with time bins, height scales with ports
-    fig_width = max(16, len(all_bins) * 1.0)
-    fig_height = max(10, len(port_keys) * 0.7)
+    # Increased scale multipliers to make the individual matrix cells larger
+    fig_width = max(18, len(all_bins) * 1.3)
+    fig_height = max(12, len(port_keys) * 0.9)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
     im = ax.imshow(
@@ -163,8 +163,9 @@ def main():
                     ha="center",
                     va="center",
                     color=text_color,
-                    fontsize=16,
-                    fontweight="bold",
+                    fontsize=24,
+                    fontweight="black",
+                    family="sans-serif",
                 )
 
     # Add colorbar
