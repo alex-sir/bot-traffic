@@ -19,7 +19,7 @@ import argparse
 import datetime
 import os
 from collections import Counter
-from scapy.all import rdpcap, IP, TCP, UDP, ICMP
+from scapy.all import PcapReader, IP, TCP, UDP, ICMP
 import matplotlib
 
 matplotlib.use("Agg")
@@ -45,34 +45,35 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     out_file = os.path.join(args.outdir, "pcap_overview_table.png")
 
-    print(f"[*] Loading {args.pcap} ...")
-    packets = rdpcap(args.pcap)
-    total_packets = len(packets)
+    print(f"[*] Streaming {args.pcap} ...")
+    total_packets = 0
 
     protocols, src_ips, dst_ips, dst_ports = Counter(), Counter(), Counter(), Counter()
     timestamps = []
     total_bytes = 0
 
     # Parse packets
-    for pkt in packets:
-        total_bytes += len(pkt)
-        if IP in pkt:
-            timestamps.append(float(pkt.time))
-            src_ips[pkt[IP].src] += 1
-            dst_ips[pkt[IP].dst] += 1
+    with PcapReader(args.pcap) as pcap_reader:
+        for pkt in pcap_reader:
+            total_packets += 1
+            total_bytes += len(pkt)
+            if IP in pkt:
+                timestamps.append(float(pkt.time))
+                src_ips[pkt[IP].src] += 1
+                dst_ips[pkt[IP].dst] += 1
 
-            if TCP in pkt:
-                protocols["TCP"] += 1
-                dst_ports[pkt[TCP].dport] += 1
-            elif UDP in pkt:
-                protocols["UDP"] += 1
-                dst_ports[pkt[UDP].dport] += 1
-            elif ICMP in pkt:
-                protocols["ICMP"] += 1
+                if TCP in pkt:
+                    protocols["TCP"] += 1
+                    dst_ports[pkt[TCP].dport] += 1
+                elif UDP in pkt:
+                    protocols["UDP"] += 1
+                    dst_ports[pkt[UDP].dport] += 1
+                elif ICMP in pkt:
+                    protocols["ICMP"] += 1
+                else:
+                    protocols["Other"] += 1
             else:
-                protocols["Other"] += 1
-        else:
-            protocols["Non-IP"] += 1
+                protocols["Non-IP"] += 1
 
     # Calculate Time and Rate Metrics
     if timestamps:
