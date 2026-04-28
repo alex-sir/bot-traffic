@@ -1,7 +1,7 @@
 """
 Script 1: PCAP Overview & Basic Statistics Summary
 
-This script reads a PCAP file and produces a single, high-quality,
+This script reads a PCAP file iteratively and produces a single, high-quality,
 table summarizing the core metrics of the network traffic,
 including data volume and packet rates.
 

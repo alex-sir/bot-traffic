@@ -1,7 +1,7 @@
 """
 Script 2: ICS/OT Port Targeting Analysis
 
-This script reads a PCAP file, identifies traffic targeting known
+This script reads a PCAP file iteratively, identifies traffic targeting known
 Industrial Control System (ICS) ports, and determines the scanning
 pattern (Sequential vs. Random) based on destination IP gaps.
 It outputs a high-resolution horizontal bar chart.
@@ -21,7 +21,7 @@ import socket
 import struct
 import os
 from collections import Counter, defaultdict
-from scapy.all import rdpcap, IP, TCP, UDP
+from scapy.all import PcapReader, IP, TCP, UDP
 import matplotlib
 
 matplotlib.use("Agg")
@@ -70,23 +70,25 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     out_file = os.path.join(args.outdir, "ics_port_analysis.png")
 
-    print(f"[*] Loading {args.pcap} ...")
-    packets = rdpcap(args.pcap)
+    print(f"[*] Streaming {args.pcap} ...")
 
     ics_hits = Counter()
     dst_ips_per_port = defaultdict(list)
 
-    # Parse packets for ICS ports
-    for pkt in packets:
-        if IP not in pkt:
-            continue
-        port = (
-            pkt[TCP].dport if TCP in pkt else (pkt[UDP].dport if UDP in pkt else None)
-        )
-        if port and port in ICS_PORTS:
-            proto = ICS_PORTS[port]
-            ics_hits[proto] += 1
-            dst_ips_per_port[proto].append(pkt[IP].dst)
+    # Parse packets iteratively for ICS ports
+    with PcapReader(args.pcap) as pcap_reader:
+        for pkt in pcap_reader:
+            if IP not in pkt:
+                continue
+            port = (
+                pkt[TCP].dport
+                if TCP in pkt
+                else (pkt[UDP].dport if UDP in pkt else None)
+            )
+            if port and port in ICS_PORTS:
+                proto = ICS_PORTS[port]
+                ics_hits[proto] += 1
+                dst_ips_per_port[proto].append(pkt[IP].dst)
 
     if not ics_hits:
         print("[-] No ICS port traffic found in the provided PCAP.")

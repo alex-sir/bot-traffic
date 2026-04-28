@@ -26,7 +26,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from scapy.all import rdpcap, IP
+from scapy.all import PcapReader, IP
 
 try:
     import maxminddb
@@ -75,9 +75,6 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     out_png = os.path.join(args.outdir, "geo_country_bar.png")
 
-    print(f"[*] Loading {args.pcap} ...")
-    packets = rdpcap(args.pcap)
-
     print(f"[*] Opening GeoIP database: {args.mmdb}")
     try:
         reader = maxminddb.open_database(args.mmdb)
@@ -85,16 +82,19 @@ def main():
         print(f"[-] Could not find MMDB file at {args.mmdb}")
         return
 
+    print(f"[*] Streaming {args.pcap} ...")
+
     country_pkt = Counter()
     country_ip = defaultdict(set)
 
-    for pkt in packets:
-        if IP not in pkt:
-            continue
-        src = pkt[IP].src
-        c = lookup_country(reader, src)
-        country_pkt[c] += 1
-        country_ip[c].add(src)
+    with PcapReader(args.pcap) as pcap_reader:
+        for pkt in pcap_reader:
+            if IP not in pkt:
+                continue
+            src = pkt[IP].src
+            c = lookup_country(reader, src)
+            country_pkt[c] += 1
+            country_ip[c].add(src)
 
     reader.close()
 

@@ -27,7 +27,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from scapy.all import rdpcap, IP, TCP, UDP
+from scapy.all import PcapReader, IP, TCP, UDP
 
 plt.rcParams.update(
     {
@@ -73,26 +73,33 @@ def main():
     out_png = os.path.join(args.outdir, "port_heatmap_matrix.png")
     out_csv = os.path.join(args.outdir, "port_heatmap_data.csv")
 
-    print(f"[*] Loading {args.pcap} ...")
-    packets = rdpcap(args.pcap)
-    if not packets:
-        print("[-] No packets found to analyze.")
-        return
+    print(f"[*] Streaming {args.pcap} ...")
 
-    t0 = float(packets[0].time)
+    t0 = None
     port_bins = defaultdict(lambda: defaultdict(int))
 
-    for pkt in packets:
-        if IP not in pkt:
-            continue
-        t = float(pkt.time)
-        bin_id = int((t - t0) / BIN_SECS)
+    with PcapReader(args.pcap) as pcap_reader:
+        for pkt in pcap_reader:
+            if t0 is None:
+                t0 = float(pkt.time)
 
-        port = (
-            pkt[TCP].dport if TCP in pkt else (pkt[UDP].dport if UDP in pkt else None)
-        )
-        if port and port in PORTS_OF_INTEREST:
-            port_bins[port][bin_id] += 1
+            if IP not in pkt:
+                continue
+
+            t = float(pkt.time)
+            bin_id = int((t - t0) / BIN_SECS)
+
+            port = (
+                pkt[TCP].dport
+                if TCP in pkt
+                else (pkt[UDP].dport if UDP in pkt else None)
+            )
+            if port and port in PORTS_OF_INTEREST:
+                port_bins[port][bin_id] += 1
+
+    if t0 is None:
+        print("[-] No packets found to analyze.")
+        return
 
     max_bin = max((b for d in port_bins.values() for b in d.keys()), default=0)
     all_bins = list(range(max_bin + 1))

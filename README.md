@@ -148,7 +148,7 @@ execution of all five Python scripts.
 ### Script 1 — `1_pcap_overview.py`
 
 **Topic: Data Engineering**
-Reads the PCAP file and produces a single, high-quality table summarizing core metrics of the network traffic, including data volume, average packet rates, and protocol distribution.
+Reads the PCAP file iteratively and produces a single, high-quality table summarizing core metrics of the network traffic, including data volume, average packet rates, and protocol distribution.
 **Outputs:** `pcap_overview_table.png`
 
 ```bash

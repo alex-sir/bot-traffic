@@ -26,7 +26,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from scapy.all import rdpcap, IP, TCP, UDP
+from scapy.all import PcapReader, IP, TCP, UDP
 
 plt.rcParams.update(
     {
@@ -71,25 +71,28 @@ def main():
     out_entropy = os.path.join(args.outdir, "entropy_diversity.png")
     out_burst = os.path.join(args.outdir, "burstiness_iat.png")
 
-    print(f"[*] Loading {args.pcap} ...")
-    packets = rdpcap(args.pcap)
-    if len(packets) < 2:
-        print("[-] Not enough packets to analyze burstiness.")
-        return
+    print(f"[*] Streaming {args.pcap} ...")
 
     src_ips = Counter()
     dst_ports = Counter()
     timestamps = []
+    total_packets = 0
 
-    # 1. Extract Data
-    for pkt in packets:
-        timestamps.append(float(pkt.time))
-        if IP in pkt:
-            src_ips[pkt[IP].src] += 1
-            if TCP in pkt:
-                dst_ports[pkt[TCP].dport] += 1
-            elif UDP in pkt:
-                dst_ports[pkt[UDP].dport] += 1
+    # 1. Extract Data Iteratively
+    with PcapReader(args.pcap) as pcap_reader:
+        for pkt in pcap_reader:
+            total_packets += 1
+            timestamps.append(float(pkt.time))
+            if IP in pkt:
+                src_ips[pkt[IP].src] += 1
+                if TCP in pkt:
+                    dst_ports[pkt[TCP].dport] += 1
+                elif UDP in pkt:
+                    dst_ports[pkt[UDP].dport] += 1
+
+    if total_packets < 2:
+        print("[-] Not enough packets to analyze burstiness.")
+        return
 
     # 2. Calculate Inter-Arrival Times (Burstiness)
     timestamps.sort()
@@ -105,7 +108,7 @@ def main():
 
     # --- Print Hard Numbers to Terminal ---
     print("\n--- Reliable Traffic Metrics ---")
-    print(f"Total Packets:     {len(packets):,}")
+    print(f"Total Packets:     {total_packets:,}")
     print(f"Mean IAT:          {mean_iat:.5f} seconds")
     print(f"IAT Variance (CV): {cv_iat:.3f} (>1 is Bursty)")
     print(f"Source IP Entropy: {ip_ent:.3f} bits (Max: {ip_max:.3f})")
