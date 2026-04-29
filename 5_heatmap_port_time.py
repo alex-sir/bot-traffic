@@ -2,7 +2,7 @@
 Script 5: Port-over-Time Heatmap Matrix
 
 This script creates a high-resolution, explicitly defined matrix heatmap
-showing packet activity on key ICS/OT ports across 1-minute time bins.
+showing packet activity on key ICS/OT ports across 1-hour time bins.
 It uses rigid gridlines to separate the data into a true table-like
 matrix, with cells displaying the exact packet count if activity occurred.
 
@@ -42,8 +42,9 @@ plt.rcParams.update(
     }
 )
 
-# Determines the resolution of the X-axis (60 seconds = 1 minute per cell)
-BIN_SECS = 60
+# --- 1 hour bins to support multi-day aggregation ---
+BIN_SECS = 3600
+
 PORTS_OF_INTEREST = {
     22: "SSH",
     23: "Telnet",
@@ -63,26 +64,22 @@ PORTS_OF_INTEREST = {
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Port-over-Time Heatmap")
-    parser.add_argument("-p", "--pcap", required=True, help="Path to input PCAP")
+    parser.add_argument(
+        "-p", "--pcap", nargs="+", required=True, help="Paths to input PCAPs"
+    )
     parser.add_argument("-o", "--outdir", default="output", help="Output directory")
     parser.add_argument(
-        "-n",
-        "--max-packets",
-        type=int,
-        default=1000000,
-        help="Maximum number of packets to process",
+        "-n", "--max-packets", type=int, default=1000000, help="Max packets per file"
     )
     return parser.parse_args()
 
 
-# --- HELPER: Transparent Compressed File Handling ---
 def open_pcap(file_path):
     with open(file_path, "rb") as f:
         magic = f.read(2)
     return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
 
 
-# --- HELPER: Datalink Layer Parsing ---
 def get_ipv4_packet(buf, datalink):
     try:
         if datalink == dpkt.pcap.DLT_EN10MB:
@@ -108,41 +105,43 @@ def main():
     out_png = os.path.join(args.outdir, "port_heatmap_matrix.png")
     out_csv = os.path.join(args.outdir, "port_heatmap_data.csv")
 
-    print(f"[*] Fast Streaming {args.pcap} using dpkt ...")
     t0 = None
     port_bins = defaultdict(lambda: defaultdict(int))
-    total_packets = 0
+
+    # Sort files by name to guarantee chronological processing for t0 discovery
+    sorted_pcaps = sorted(args.pcap)
 
     # --- PHASE 1: Data Extraction & Bucketing ---
-    with open_pcap(args.pcap) as f:
-        pcap = dpkt.pcap.Reader(f)
-        datalink = pcap.datalink()
-        for ts, buf in pcap:
-            if total_packets >= args.max_packets:
-                print(
-                    f"[*] Reached {args.max_packets:,} packet limit. Moving to analysis..."
-                )
-                break
+    for pcap_file in sorted_pcaps:
+        print(f"[*] Parsing {os.path.basename(pcap_file)}...")
+        packets_this_file = 0
 
-            total_packets += 1
-            if t0 is None:
-                t0 = ts  # Mark the exact starting timestamp for baseline offsetting
+        with open_pcap(pcap_file) as f:
+            pcap = dpkt.pcap.Reader(f)
+            datalink = pcap.datalink()
+            for ts, buf in pcap:
+                if packets_this_file >= args.max_packets:
+                    break
+                packets_this_file += 1
 
-            ip = get_ipv4_packet(buf, datalink)
-            if not ip:
-                continue
+                # Baseline offset is set to the very first packet of the first chronologically ordered file
+                if t0 is None:
+                    t0 = ts
 
-            port = None
-            if ip.p in (6, 17):
-                try:
-                    port = ip.data.dport
-                except:
-                    pass
+                ip = get_ipv4_packet(buf, datalink)
+                if not ip:
+                    continue
 
-            if port and port in PORTS_OF_INTEREST:
-                # Determine which 1-minute time bucket this packet belongs to
-                bin_id = int((ts - t0) / BIN_SECS)
-                port_bins[port][bin_id] += 1
+                port = None
+                if ip.p in (6, 17):
+                    try:
+                        port = ip.data.dport
+                    except:
+                        pass
+
+                if port and port in PORTS_OF_INTEREST:
+                    bin_id = int((ts - t0) / BIN_SECS)
+                    port_bins[port][bin_id] += 1
 
     if t0 is None:
         print("[-] No packets found to analyze.")
@@ -154,18 +153,14 @@ def main():
     port_keys = list(PORTS_OF_INTEREST.keys())
     port_labels = [f"{PORTS_OF_INTEREST[p]} ({p})" for p in port_keys]
 
-    # Convert the bucketed data into a formal 2D numpy matrix
     matrix = np.array(
         [[port_bins[p].get(b, 0) for b in all_bins] for p in port_keys], dtype=float
     )
-
-    # We use log1p (log(1+x)) for the color scale because network traffic has massive
-    # outliers (e.g., cell A has 2 packets, cell B has 50,000 packets during a heavy scan).
-    # A linear scale would completely wash out cell A to appear empty.
     matrix_log = np.log1p(matrix)
 
     # --- PHASE 3: Visualization ---
-    fig_width = max(18, len(all_bins) * 1.3)
+    # Width calculation is capped to prevent massive multi-day matrices from breaking matplotlib
+    fig_width = min(max(18, len(all_bins) * 0.8), 60)
     fig_height = max(12, len(port_keys) * 0.9)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
@@ -176,52 +171,58 @@ def main():
         norm=mcolors.Normalize(vmin=0, vmax=matrix_log.max()),
     )
 
-    # Hack to create a perfect "table/matrix" look: we define minor ticks explicitly
-    # halfway between the major axis units (-0.5), and only draw gridlines on those minor ticks.
     ax.set_xticks(np.arange(-0.5, len(all_bins), 1), minor=True)
     ax.set_yticks(np.arange(-0.5, len(port_keys), 1), minor=True)
-    ax.grid(which="minor", color="black", linestyle="-", linewidth=2)
+    ax.grid(which="minor", color="black", linestyle="-", linewidth=1.5)
     ax.grid(which="major", visible=False)
 
     ax.set_yticks(range(len(port_labels)))
     ax.set_yticklabels(port_labels)
     ax.set_ylabel("Targeted Protocol / Port", labelpad=20, fontweight="bold")
 
-    # Generate human-readable timestamps for the X-axis columns
     time_labels = [
         datetime.datetime.fromtimestamp(
             t0 + b * BIN_SECS, tz=datetime.timezone.utc
-        ).strftime("%H:%M")
+        ).strftime("%m-%d %H:00")
         for b in all_bins
     ]
-    ax.set_xticks(range(len(all_bins)))
-    ax.set_xticklabels(time_labels, rotation=45, ha="right")
-    ax.set_xlabel("Time Bins (UTC, 1-Minute Intervals)", labelpad=20, fontweight="bold")
 
-    ax.set_title("Port Activity Matrix (Hits per Minute)", pad=25, fontweight="bold")
+    # Tick Label Optimizer: If there are too many columns, only show tick labels every N hours to prevent overlapping
+    tick_spacing = max(1, len(all_bins) // 30)
+    ax.set_xticks(range(0, len(all_bins), tick_spacing))
+    ax.set_xticklabels(
+        [time_labels[i] for i in range(0, len(all_bins), tick_spacing)],
+        rotation=45,
+        ha="right",
+    )
+    ax.set_xlabel("Time Bins (UTC, 1-Hour Intervals)", labelpad=20, fontweight="bold")
 
-    # Overlay numeric values onto each cell in the matrix
-    for i in range(len(port_keys)):
-        for j in range(len(all_bins)):
-            val = int(matrix[i, j])
-            if val > 0:
-                # Dynamic text color: White text for dark cells, black text for light cells
-                text_color = (
-                    "white" if matrix_log[i, j] > (matrix_log.max() * 0.6) else "black"
-                )
-                ax.text(
-                    j,
-                    i,
-                    str(val),
-                    ha="center",
-                    va="center",
-                    color=text_color,
-                    fontsize=30,
-                    fontweight="black",
-                    family="sans-serif",
-                )
+    ax.set_title(
+        "Port Activity Matrix (Hits per Hour, Aggregated)", pad=25, fontweight="bold"
+    )
 
-    # Colorbar configuration
+    # Text Overlay Guard: Only draw physical numbers inside the cells if the matrix isn't incredibly wide
+    if len(all_bins) <= 48:
+        for i in range(len(port_keys)):
+            for j in range(len(all_bins)):
+                val = int(matrix[i, j])
+                if val > 0:
+                    text_color = (
+                        "white"
+                        if matrix_log[i, j] > (matrix_log.max() * 0.6)
+                        else "black"
+                    )
+                    ax.text(
+                        j,
+                        i,
+                        str(val),
+                        ha="center",
+                        va="center",
+                        color=text_color,
+                        fontsize=18,
+                        fontweight="bold",
+                    )
+
     cbar = plt.colorbar(im, ax=ax, fraction=0.025, pad=0.02)
     cbar.set_label(
         "Log(Packet Count + 1)",
@@ -235,7 +236,6 @@ def main():
     plt.tight_layout()
     plt.savefig(out_png, dpi=300, bbox_inches="tight")
 
-    # Save the raw matrix out to CSV
     df = pd.DataFrame(
         matrix.astype(int), index=port_labels, columns=[f"bin_{b}" for b in all_bins]
     )

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Usage: ./run_analysis.sh <YYYY> <MM> <START_DAY> <END_DAY> "<HOURS>" [MAX_PACKETS]
+# Usage: ./run_analysis.sh <YYYY> <MM> <START_DAY> <END_DAY> "<HOURS>" [MAX_PACKETS_PER_FILE]
 # Example: ./run_analysis.sh 2021 03 01 07 "00 12" 71500000
 
 YEAR=$1
@@ -17,70 +17,59 @@ if [ -z "$HOURS" ]; then
   exit 1
 fi
 
-echo "[*] Starting batch processing for $YEAR-$MONTH"
+echo "[*] Starting AGGREGATED batch processing for $YEAR-$MONTH"
 echo "[*] Days Range: $START_DAY to $END_DAY"
 echo "[*] Target Hours: $HOURS"
-echo "[*] Maximum packets per file set to: $MAX_PACKETS"
+echo "[*] Maximum packets PER FILE set to: $MAX_PACKETS"
 echo "==================================================="
 
-# Loop through the days, forcing base-10 to prevent octal errors on zero-padded numbers
+# Check the year and use the appropriate GeoLite file
+if [ "$YEAR" == "2021" ]; then
+  MMDB_PATH="./data/GeoLite2-Country-2021.mmdb"
+else
+  MMDB_PATH="./data/GeoLite2-Country-2025.mmdb"
+fi
+
+# 1. Gather all target files into a single string variable
+PCAP_LIST=""
+
 for ((d = 10#$START_DAY; d <= 10#$END_DAY; d++)); do
-
-  # Ensure the day variable is always two digits (e.g., 01, 02)
   DAY=$(printf "%02d" $d)
-
   DATA_DIR="/data/$YEAR/$MONTH/$DAY"
-  OUTPUT_BASE="./analysis_results/$YEAR/$MONTH/$DAY"
 
-  # Check if the data directory exists for this specific day
-  if [ ! -d "$DATA_DIR" ]; then
-    echo "[-] Directory $DATA_DIR does not exist. Skipping $YEAR-$MONTH-$DAY."
-    continue
-  fi
-
-  # Check the year and use the appropriate GeoLite file
-  if [ "$YEAR" == "2021" ]; then
-    MMDB_PATH="./data/GeoLite2-Country-2021.mmdb"
-  else
-    MMDB_PATH="./data/GeoLite2-Country-2025.mmdb"
-  fi
-
-  echo -e "\n[*] Processing day: $YEAR-$MONTH-$DAY"
-  echo "[*] Using GeoLite data: $MMDB_PATH"
-
-  # Iterate ONLY over the specific hours provided by the user
   for h in $HOURS; do
-
-    # Ensure the hour variable is always two digits (handles inputs like "0" or "00" cleanly)
     HOUR=$(printf "%02d" $((10#$h)))
     pcap_file="$DATA_DIR/$YEAR-$MONTH-$DAY.$HOUR.pcap.gz"
 
-    # Check if the exact target file exists
-    if [ ! -f "$pcap_file" ]; then
-      echo "[-] File $pcap_file not found. Skipping."
-      continue
+    if [ -f "$pcap_file" ]; then
+      PCAP_LIST="$PCAP_LIST $pcap_file"
+    else
+      echo "[-] Warning: $pcap_file not found. Skipping in aggregation."
     fi
-
-    # Extract base names for output folders
-    filename=$(basename -- "$pcap_file")
-    base_name="${filename%.pcap.gz}"
-
-    # Create a dedicated output folder for this specific hour
-    HOUR_OUTDIR="$OUTPUT_BASE/$base_name"
-    mkdir -p "$HOUR_OUTDIR"
-
-    echo "---------------------------------------------------"
-    echo "[*] Running pipeline on $filename (Cap: $MAX_PACKETS packets)..."
-
-    # Run the scripts sequentially
-    python 1_pcap_overview.py -p "$pcap_file" -o "$HOUR_OUTDIR" -n "$MAX_PACKETS"
-    python 2_ics_port_analysis.py -p "$pcap_file" -o "$HOUR_OUTDIR" -n "$MAX_PACKETS"
-    python 3_entropy_burstiness.py -p "$pcap_file" -o "$HOUR_OUTDIR" -n "$MAX_PACKETS"
-    python 4_geo_analysis.py -p "$pcap_file" -m "$MMDB_PATH" -o "$HOUR_OUTDIR" -n "$MAX_PACKETS"
-    python 5_heatmap_port_time.py -p "$pcap_file" -o "$HOUR_OUTDIR" -n "$MAX_PACKETS"
-
   done
 done
 
+# Check if we actually found any files
+if [ -z "$PCAP_LIST" ]; then
+  echo "[-] Critical Error: No matching PCAP files found for the given parameters."
+  exit 1
+fi
+
+# 2. Create a single master output directory for the combined results
+OUTPUT_DIR="./analysis_results/${YEAR}_${MONTH}_combined"
+mkdir -p "$OUTPUT_DIR"
+
+echo "---------------------------------------------------"
+echo "[*] Running combined pipeline on all collected files..."
+echo "[*] Outputting results to: $OUTPUT_DIR"
+echo "---------------------------------------------------"
+
+# 3. Run the scripts ONCE, passing the entire list of files at the same time
+python 1_pcap_overview.py -p "$PCAP_LIST" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+python 2_ics_port_analysis.py -p "$PCAP_LIST" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+python 3_entropy_burstiness.py -p "$PCAP_LIST" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+python 4_geo_analysis.py -p "$PCAP_LIST" -m "$MMDB_PATH" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+python 5_heatmap_port_time.py -p "$PCAP_LIST" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+
 echo "==================================================="
-echo "[*] Processing successfully completed for $YEAR-$MONTH ($START_DAY to $END_DAY)."
+echo "[*] Combined processing successfully completed!"

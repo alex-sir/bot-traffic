@@ -44,29 +44,23 @@ plt.rcParams.update(
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Reliable Entropy & Burstiness Analysis"
+    parser = argparse.ArgumentParser(description="Reliable Entropy & Burstiness")
+    parser.add_argument(
+        "-p", "--pcap", nargs="+", required=True, help="Paths to input PCAPs"
     )
-    parser.add_argument("-p", "--pcap", required=True, help="Path to input PCAP")
     parser.add_argument("-o", "--outdir", default="output", help="Output directory")
     parser.add_argument(
-        "-n",
-        "--max-packets",
-        type=int,
-        default=1000000,
-        help="Maximum number of packets to process",
+        "-n", "--max-packets", type=int, default=1000000, help="Max packets per file"
     )
     return parser.parse_args()
 
 
-# --- HELPER: Transparent Compressed File Handling ---
 def open_pcap(file_path):
     with open(file_path, "rb") as f:
         magic = f.read(2)
     return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
 
 
-# --- HELPER: Datalink Layer Parsing ---
 def get_ipv4_packet(buf, datalink):
     try:
         if datalink == dpkt.pcap.DLT_EN10MB:
@@ -87,9 +81,6 @@ def get_ipv4_packet(buf, datalink):
 
 
 def calc_entropy(counter):
-    # Calculates the Shannon Entropy of a distribution.
-    # High entropy indicates high diversity (e.g., thousands of different IPs attacking).
-    # Low entropy indicates highly concentrated activity (e.g., a massive attack from 1 IP).
     total = sum(counter.values())
     unique_count = len(counter)
     if total == 0 or unique_count == 0:
@@ -97,7 +88,6 @@ def calc_entropy(counter):
     entropy = -sum(
         (c / total) * math.log2(c / total) for c in counter.values() if c > 0
     )
-    # Max entropy is the theoretical limit if every item was perfectly uniformly distributed.
     max_entropy = math.log2(unique_count)
     return entropy, max_entropy
 
@@ -108,58 +98,51 @@ def main():
     out_entropy = os.path.join(args.outdir, "entropy_diversity.png")
     out_burst = os.path.join(args.outdir, "burstiness_iat.png")
 
-    print(f"[*] Fast Streaming {args.pcap} using dpkt ...")
     src_ips, dst_ports = Counter(), Counter()
-    timestamps = []
     total_packets = 0
+    all_iats = []
 
-    # --- PHASE 1: Data Extraction ---
-    with open_pcap(args.pcap) as f:
-        pcap = dpkt.pcap.Reader(f)
-        datalink = pcap.datalink()
-        for ts, buf in pcap:
-            if total_packets >= args.max_packets:
-                print(
-                    f"[*] Reached {args.max_packets:,} packet limit. Moving to analysis..."
-                )
-                break
+    # --- PHASE 1: Data Extraction & Safe IAT Segregation ---
+    for pcap_file in args.pcap:
+        print(f"[*] Parsing {os.path.basename(pcap_file)}...")
+        packets_this_file = 0
+        file_timestamps = []
 
-            total_packets += 1
-            timestamps.append(ts)
-            ip = get_ipv4_packet(buf, datalink)
-            if ip:
-                src_ips[ip.src] += 1
-                if ip.p in (6, 17):
-                    try:
-                        dst_ports[ip.data.dport] += 1
-                    except:
-                        pass
+        with open_pcap(pcap_file) as f:
+            pcap = dpkt.pcap.Reader(f)
+            datalink = pcap.datalink()
+            for ts, buf in pcap:
+                if packets_this_file >= args.max_packets:
+                    break
 
-    if total_packets < 2:
+                packets_this_file += 1
+                total_packets += 1
+                ip = get_ipv4_packet(buf, datalink)
+                if ip:
+                    file_timestamps.append(ts)
+                    src_ips[ip.src] += 1
+                    if ip.p in (6, 17):
+                        try:
+                            dst_ports[ip.data.dport] += 1
+                        except:
+                            pass
+
+        # Calculate Burstiness strictly WITHIN the boundaries of this specific file
+        file_timestamps.sort()
+        if len(file_timestamps) > 1:
+            all_iats.extend(np.diff(file_timestamps))
+
+    if total_packets < 2 or not all_iats:
         print("[-] Not enough packets to analyze burstiness.")
         return
 
-    # --- PHASE 2: Calculation (Burstiness) ---
-    timestamps.sort()
-    # Inter-Arrival Time (IAT) is the time gap between consecutive packets.
-    iats = np.diff(timestamps)
-
+    # --- PHASE 2: Calculation ---
+    iats = np.array(all_iats)
     mean_iat, std_iat = np.mean(iats), np.std(iats)
-
-    # The Coefficient of Variation (CV) measures how "bursty" the traffic is.
-    # A CV near 1 implies Poisson-like random timing. A CV >> 1 indicates highly clustered
-    # "bursty" behavior, which is common in coordinated botnet attacks.
     cv_iat = std_iat / mean_iat if mean_iat > 0 else 0
 
     ip_ent, ip_max = calc_entropy(src_ips)
     port_ent, port_max = calc_entropy(dst_ports)
-
-    print("\n--- Reliable Traffic Metrics ---")
-    print(f"Total Packets:     {total_packets:,}")
-    print(f"Mean IAT:          {mean_iat:.5f} seconds")
-    print(f"IAT Variance (CV): {cv_iat:.3f} (>1 is Bursty)")
-    print(f"Source IP Entropy: {ip_ent:.3f} bits (Max: {ip_max:.3f})")
-    print(f"Dest Port Entropy: {port_ent:.3f} bits (Max: {port_max:.3f})\n")
 
     # --- PHASE 3: Visualization (Graph 1 - Entropy) ---
     fig1, ax1 = plt.subplots(figsize=(10, 8))
@@ -170,36 +153,33 @@ def main():
     )
     x, width = np.arange(len(labels)), 0.35
 
-    # Plot actual entropy
     ax1.bar(
         x - width / 2,
         actual_vals,
         width,
-        label="Actual Entropy",
+        label="Actual",
         color="#4C72B0",
         edgecolor="black",
         linewidth=1.5,
     )
-    # Plot maximum possible entropy as a hatched background bar
     ax1.bar(
         x + width / 2,
         max_vals,
         width,
-        label="Theoretical Max",
+        label="Max",
         color="#DDDDDD",
         edgecolor="black",
         hatch="//",
         linewidth=1.5,
     )
     ax1.set_ylabel("Shannon Entropy (Bits)", fontweight="bold", labelpad=15)
-    ax1.set_title("Traffic Diversity (Actual vs. Maximum)", pad=20, fontweight="bold")
+    ax1.set_title("Traffic Diversity (Aggregated)", pad=20, fontweight="bold")
     ax1.set_xticks(x)
     ax1.set_xticklabels(labels, fontweight="bold")
     ax1.grid(axis="y", linestyle="--", alpha=0.7)
     ax1.set_ylim(0, max(max_vals) * 1.35)
     ax1.legend(loc="upper right", framealpha=0.9, edgecolor="black", borderpad=0.8)
 
-    # Add numeric labels to bars
     for i, v in enumerate(actual_vals):
         ax1.text(
             i - width / 2,
@@ -228,11 +208,8 @@ def main():
     # --- PHASE 4: Visualization (Graph 2 - Burstiness) ---
     fig2, ax2 = plt.subplots(figsize=(12, 8))
     iats_ms = iats * 1000
-
-    # We use a logarithmic scale for the bins because network gaps can range
-    # from sub-microseconds up to several seconds. A linear histogram would group
-    # almost everything into a single massive bar.
     bins = np.logspace(np.log10(max(0.001, min(iats_ms))), np.log10(max(iats_ms)), 50)
+
     ax2.hist(
         iats_ms,
         bins=bins,
@@ -248,7 +225,7 @@ def main():
     )
     ax2.set_ylabel("Frequency (Log Scale)", fontweight="bold", labelpad=15)
     ax2.set_title(
-        f"Inter-Arrival Time Distribution\n[Burstiness (CV): {cv_iat:.2f} | Mean Gap: {mean_iat * 1000:.1f} ms]",
+        f"Inter-Arrival Time Distribution (Aggregated)\n[Burstiness (CV): {cv_iat:.2f} | Mean Gap: {mean_iat * 1000:.1f} ms]",
         pad=20,
         fontweight="bold",
     )
