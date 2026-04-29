@@ -66,12 +66,14 @@ def parse_args():
     return parser.parse_args()
 
 
+# --- HELPER: Transparent Compressed File Handling ---
 def open_pcap(file_path):
     with open(file_path, "rb") as f:
         magic = f.read(2)
     return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
 
 
+# --- HELPER: Datalink Layer Parsing ---
 def get_ipv4_packet(buf, datalink):
     try:
         if datalink == dpkt.pcap.DLT_EN10MB:
@@ -92,6 +94,9 @@ def get_ipv4_packet(buf, datalink):
 
 
 def lookup_country(reader, ip):
+    # Safely query the MaxMind database for the ISO country code.
+    # Note: If the precise physical 'country' is unlisted, we fall back to
+    # the 'registered_country' (where the ISP is legally headquartered).
     try:
         res = reader.get(ip)
         if res and "country" in res:
@@ -112,6 +117,9 @@ def main():
     ip_packet_counts = Counter()
     total_packets = 0
 
+    # --- PHASE 1: Memory Aggregation (Optimization) ---
+    # Instead of querying the database for all packets (which is very slow),
+    # we simply count how many packets each unique IP address sent.
     with open_pcap(args.pcap) as f:
         pcap = dpkt.pcap.Reader(f)
         datalink = pcap.datalink()
@@ -130,6 +138,8 @@ def main():
     print(
         f"[*] Lookups required reduced to {len(ip_packet_counts)} unique IPs. Opening GeoIP database..."
     )
+
+    # --- PHASE 2: Geographic Lookup ---
     try:
         reader = maxminddb.open_database(args.mmdb)
     except FileNotFoundError:
@@ -139,9 +149,10 @@ def main():
     country_pkt = Counter()
     country_ip = defaultdict(set)
 
-    # Do the DB lookups AFTER aggregating (massive speedup)
+    # Now we perform the DB lookup only once per UNIQUE IP address.
+    # We add the total packet count for that IP to the final country tally.
     for src_bytes, count in ip_packet_counts.items():
-        src_str = socket.inet_ntoa(src_bytes)
+        src_str = socket.inet_ntoa(src_bytes)  # Convert binary IP to string format
         c = lookup_country(reader, src_str)
         country_pkt[c] += count
         country_ip[c].add(src_bytes)
@@ -152,6 +163,7 @@ def main():
         print("[-] No valid IP traffic found to map.")
         return
 
+    # --- PHASE 3: Visualization ---
     rows = [
         {"country": c, "packets": p, "unique_ips": len(country_ip[c])}
         for c, p in country_pkt.most_common(TOP_N)
@@ -165,6 +177,8 @@ def main():
     ax.set_xlabel("Total Packet Count", labelpad=15, fontweight="bold")
     ax.set_title(f"Top Source Countries by Packet Volume", pad=20, fontweight="bold")
     ax.grid(axis="x", linestyle="--", alpha=0.5)
+
+    # Extend X-axis to ensure the annotations don't get cut off
     ax.set_xlim(0, max(df["packets"]) * 1.45)
 
     for bar, u_ips in zip(bars, df["unique_ips"]):

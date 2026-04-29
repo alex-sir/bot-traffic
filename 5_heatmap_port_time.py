@@ -32,16 +32,17 @@ import matplotlib.colors as mcolors
 
 plt.rcParams.update(
     {
-        "font.size": 18,
+        "font.size": 22,
         "font.family": "serif",
-        "axes.labelsize": 20,
-        "axes.titlesize": 24,
-        "xtick.labelsize": 16,
-        "ytick.labelsize": 18,
+        "axes.labelsize": 26,
+        "axes.titlesize": 30,
+        "xtick.labelsize": 20,
+        "ytick.labelsize": 22,
         "figure.dpi": 300,
     }
 )
 
+# Determines the resolution of the X-axis (60 seconds = 1 minute per cell)
 BIN_SECS = 60
 PORTS_OF_INTEREST = {
     22: "SSH",
@@ -74,12 +75,14 @@ def parse_args():
     return parser.parse_args()
 
 
+# --- HELPER: Transparent Compressed File Handling ---
 def open_pcap(file_path):
     with open(file_path, "rb") as f:
         magic = f.read(2)
     return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
 
 
+# --- HELPER: Datalink Layer Parsing ---
 def get_ipv4_packet(buf, datalink):
     try:
         if datalink == dpkt.pcap.DLT_EN10MB:
@@ -110,6 +113,7 @@ def main():
     port_bins = defaultdict(lambda: defaultdict(int))
     total_packets = 0
 
+    # --- PHASE 1: Data Extraction & Bucketing ---
     with open_pcap(args.pcap) as f:
         pcap = dpkt.pcap.Reader(f)
         datalink = pcap.datalink()
@@ -122,7 +126,8 @@ def main():
 
             total_packets += 1
             if t0 is None:
-                t0 = ts
+                t0 = ts  # Mark the exact starting timestamp for baseline offsetting
+
             ip = get_ipv4_packet(buf, datalink)
             if not ip:
                 continue
@@ -135,6 +140,7 @@ def main():
                     pass
 
             if port and port in PORTS_OF_INTEREST:
+                # Determine which 1-minute time bucket this packet belongs to
                 bin_id = int((ts - t0) / BIN_SECS)
                 port_bins[port][bin_id] += 1
 
@@ -142,16 +148,23 @@ def main():
         print("[-] No packets found to analyze.")
         return
 
+    # --- PHASE 2: Matrix Construction ---
     max_bin = max((b for d in port_bins.values() for b in d.keys()), default=0)
     all_bins = list(range(max_bin + 1))
     port_keys = list(PORTS_OF_INTEREST.keys())
     port_labels = [f"{PORTS_OF_INTEREST[p]} ({p})" for p in port_keys]
 
+    # Convert the bucketed data into a formal 2D numpy matrix
     matrix = np.array(
         [[port_bins[p].get(b, 0) for b in all_bins] for p in port_keys], dtype=float
     )
+
+    # We use log1p (log(1+x)) for the color scale because network traffic has massive
+    # outliers (e.g., cell A has 2 packets, cell B has 50,000 packets during a heavy scan).
+    # A linear scale would completely wash out cell A to appear empty.
     matrix_log = np.log1p(matrix)
 
+    # --- PHASE 3: Visualization ---
     fig_width = max(18, len(all_bins) * 1.3)
     fig_height = max(12, len(port_keys) * 0.9)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
@@ -163,6 +176,8 @@ def main():
         norm=mcolors.Normalize(vmin=0, vmax=matrix_log.max()),
     )
 
+    # Hack to create a perfect "table/matrix" look: we define minor ticks explicitly
+    # halfway between the major axis units (-0.5), and only draw gridlines on those minor ticks.
     ax.set_xticks(np.arange(-0.5, len(all_bins), 1), minor=True)
     ax.set_yticks(np.arange(-0.5, len(port_keys), 1), minor=True)
     ax.grid(which="minor", color="black", linestyle="-", linewidth=2)
@@ -170,8 +185,9 @@ def main():
 
     ax.set_yticks(range(len(port_labels)))
     ax.set_yticklabels(port_labels)
-    ax.set_ylabel("Targeted Protocol / Port", labelpad=15, fontweight="bold")
+    ax.set_ylabel("Targeted Protocol / Port", labelpad=20, fontweight="bold")
 
+    # Generate human-readable timestamps for the X-axis columns
     time_labels = [
         datetime.datetime.fromtimestamp(
             t0 + b * BIN_SECS, tz=datetime.timezone.utc
@@ -180,14 +196,16 @@ def main():
     ]
     ax.set_xticks(range(len(all_bins)))
     ax.set_xticklabels(time_labels, rotation=45, ha="right")
-    ax.set_xlabel("Time Bins (UTC, 1-Minute Intervals)", labelpad=15, fontweight="bold")
+    ax.set_xlabel("Time Bins (UTC, 1-Minute Intervals)", labelpad=20, fontweight="bold")
 
-    ax.set_title("Port Activity Matrix (Hits per Minute)", pad=20, fontweight="bold")
+    ax.set_title("Port Activity Matrix (Hits per Minute)", pad=25, fontweight="bold")
 
+    # Overlay numeric values onto each cell in the matrix
     for i in range(len(port_keys)):
         for j in range(len(all_bins)):
             val = int(matrix[i, j])
             if val > 0:
+                # Dynamic text color: White text for dark cells, black text for light cells
                 text_color = (
                     "white" if matrix_log[i, j] > (matrix_log.max() * 0.6) else "black"
                 )
@@ -198,18 +216,26 @@ def main():
                     ha="center",
                     va="center",
                     color=text_color,
-                    fontsize=24,
+                    fontsize=30,
                     fontweight="black",
                     family="sans-serif",
                 )
 
+    # Colorbar configuration
     cbar = plt.colorbar(im, ax=ax, fraction=0.025, pad=0.02)
     cbar.set_label(
-        "Log(Packet Count + 1)", rotation=270, labelpad=25, fontweight="bold"
+        "Log(Packet Count + 1)",
+        rotation=270,
+        labelpad=30,
+        fontweight="bold",
+        fontsize=24,
     )
+    cbar.ax.tick_params(labelsize=20)
 
     plt.tight_layout()
     plt.savefig(out_png, dpi=300, bbox_inches="tight")
+
+    # Save the raw matrix out to CSV
     df = pd.DataFrame(
         matrix.astype(int), index=port_labels, columns=[f"bin_{b}" for b in all_bins]
     )
