@@ -10,15 +10,17 @@ Usage Instructions:
     Run the script from the terminal, providing the path to your PCAP file.
 
     Basic usage:
-        python 5_heatmap_port_time.py -p <path_to_pcap_file>
+        python 5_heatmap_port_time.py -p <path_to_pcap_file> -n 1000000
 
     Example with custom output directory:
-        python 5_heatmap_port_time.py -p data/traffic.pcap -o output/
+        python 5_heatmap_port_time.py -p data/traffic.pcap -o output/ -n 71500000
 """
 
 import argparse
 import datetime
 import os
+import gzip
+import dpkt
 from collections import defaultdict
 import numpy as np
 import pandas as pd
@@ -27,7 +29,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from scapy.all import PcapReader, IP, TCP, UDP
 
 plt.rcParams.update(
     {
@@ -42,7 +43,6 @@ plt.rcParams.update(
 )
 
 BIN_SECS = 60
-
 PORTS_OF_INTEREST = {
     22: "SSH",
     23: "Telnet",
@@ -64,7 +64,39 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Port-over-Time Heatmap")
     parser.add_argument("-p", "--pcap", required=True, help="Path to input PCAP")
     parser.add_argument("-o", "--outdir", default="output", help="Output directory")
+    parser.add_argument(
+        "-n",
+        "--max-packets",
+        type=int,
+        default=1000000,
+        help="Maximum number of packets to process",
+    )
     return parser.parse_args()
+
+
+def open_pcap(file_path):
+    with open(file_path, "rb") as f:
+        magic = f.read(2)
+    return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
+
+
+def get_ipv4_packet(buf, datalink):
+    try:
+        if datalink == dpkt.pcap.DLT_EN10MB:
+            eth = dpkt.ethernet.Ethernet(buf)
+            if isinstance(eth.data, dpkt.ip.IP):
+                return eth.data
+        elif datalink == dpkt.pcap.DLT_LINUX_SLL:
+            sll = dpkt.sll.SLL(buf)
+            if isinstance(sll.data, dpkt.ip.IP):
+                return sll.data
+        elif datalink in (12, 14, 101, 228):
+            ip = dpkt.ip.IP(buf)
+            if ip.v == 4:
+                return ip
+    except Exception:
+        pass
+    return None
 
 
 def main():
@@ -73,28 +105,37 @@ def main():
     out_png = os.path.join(args.outdir, "port_heatmap_matrix.png")
     out_csv = os.path.join(args.outdir, "port_heatmap_data.csv")
 
-    print(f"[*] Streaming {args.pcap} ...")
-
+    print(f"[*] Fast Streaming {args.pcap} using dpkt ...")
     t0 = None
     port_bins = defaultdict(lambda: defaultdict(int))
+    total_packets = 0
 
-    with PcapReader(args.pcap) as pcap_reader:
-        for pkt in pcap_reader:
+    with open_pcap(args.pcap) as f:
+        pcap = dpkt.pcap.Reader(f)
+        datalink = pcap.datalink()
+        for ts, buf in pcap:
+            if total_packets >= args.max_packets:
+                print(
+                    f"[*] Reached {args.max_packets:,} packet limit. Moving to analysis..."
+                )
+                break
+
+            total_packets += 1
             if t0 is None:
-                t0 = float(pkt.time)
-
-            if IP not in pkt:
+                t0 = ts
+            ip = get_ipv4_packet(buf, datalink)
+            if not ip:
                 continue
 
-            t = float(pkt.time)
-            bin_id = int((t - t0) / BIN_SECS)
+            port = None
+            if ip.p in (6, 17):
+                try:
+                    port = ip.data.dport
+                except:
+                    pass
 
-            port = (
-                pkt[TCP].dport
-                if TCP in pkt
-                else (pkt[UDP].dport if UDP in pkt else None)
-            )
             if port and port in PORTS_OF_INTEREST:
+                bin_id = int((ts - t0) / BIN_SECS)
                 port_bins[port][bin_id] += 1
 
     if t0 is None:
@@ -103,18 +144,14 @@ def main():
 
     max_bin = max((b for d in port_bins.values() for b in d.keys()), default=0)
     all_bins = list(range(max_bin + 1))
-
     port_keys = list(PORTS_OF_INTEREST.keys())
     port_labels = [f"{PORTS_OF_INTEREST[p]} ({p})" for p in port_keys]
 
-    # Build the matrix
     matrix = np.array(
         [[port_bins[p].get(b, 0) for b in all_bins] for p in port_keys], dtype=float
     )
     matrix_log = np.log1p(matrix)
 
-    # --- Plotting ---
-    # Increased scale multipliers to make the individual matrix cells larger
     fig_width = max(18, len(all_bins) * 1.3)
     fig_height = max(12, len(port_keys) * 0.9)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
@@ -126,22 +163,15 @@ def main():
         norm=mcolors.Normalize(vmin=0, vmax=matrix_log.max()),
     )
 
-    # --- Creating the "Actual Matrix" Grid Look ---
-    # Set minor ticks exactly in between the major ticks to draw borders around cells
     ax.set_xticks(np.arange(-0.5, len(all_bins), 1), minor=True)
     ax.set_yticks(np.arange(-0.5, len(port_keys), 1), minor=True)
-
-    # Draw thick gridlines on the minor ticks to create the matrix cells
     ax.grid(which="minor", color="black", linestyle="-", linewidth=2)
-    # Ensure major ticks don't draw gridlines over the text
     ax.grid(which="major", visible=False)
 
-    # Configure Y-axis (Ports)
     ax.set_yticks(range(len(port_labels)))
     ax.set_yticklabels(port_labels)
     ax.set_ylabel("Targeted Protocol / Port", labelpad=15, fontweight="bold")
 
-    # Configure X-axis (Time Bins)
     time_labels = [
         datetime.datetime.fromtimestamp(
             t0 + b * BIN_SECS, tz=datetime.timezone.utc
@@ -154,12 +184,10 @@ def main():
 
     ax.set_title("Port Activity Matrix (Hits per Minute)", pad=20, fontweight="bold")
 
-    # Add numeric annotations inside the matrix cells
     for i in range(len(port_keys)):
         for j in range(len(all_bins)):
             val = int(matrix[i, j])
             if val > 0:
-                # Use a dark color for text if the cell is light, white if the cell is dark
                 text_color = (
                     "white" if matrix_log[i, j] > (matrix_log.max() * 0.6) else "black"
                 )
@@ -175,7 +203,6 @@ def main():
                     family="sans-serif",
                 )
 
-    # Add colorbar
     cbar = plt.colorbar(im, ax=ax, fraction=0.025, pad=0.02)
     cbar.set_label(
         "Log(Packet Count + 1)", rotation=270, labelpad=25, fontweight="bold"
@@ -183,9 +210,6 @@ def main():
 
     plt.tight_layout()
     plt.savefig(out_png, dpi=300, bbox_inches="tight")
-    print(f"[+] Matrix heatmap saved to {out_png}")
-
-    # Save raw data alongside the image
     df = pd.DataFrame(
         matrix.astype(int), index=port_labels, columns=[f"bin_{b}" for b in all_bins]
     )

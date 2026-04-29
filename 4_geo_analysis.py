@@ -11,22 +11,24 @@ Usage Instructions:
     file and the path to the MaxMind GeoLite2-Country.mmdb file.
 
     Basic usage:
-        python 4_geo_analysis.py -p <path_to_pcap_file> -m <path_to_mmdb_file>
+        python 4_geo_analysis.py -p <path_to_pcap_file> -m <path_to_mmdb_file> -n 1000000
 
     Example with custom output directory:
-        python 4_geo_analysis.py -p data/traffic.pcap -m data/GeoLite2-Country.mmdb -o output/
+        python 4_geo_analysis.py -p data/traffic.pcap -m data/GeoLite2-Country.mmdb -o output/ -n 71500000
 """
 
 import argparse
 import os
 import sys
+import gzip
+import socket
+import dpkt
 from collections import Counter, defaultdict
 import pandas as pd
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from scapy.all import PcapReader, IP
 
 try:
     import maxminddb
@@ -44,8 +46,7 @@ plt.rcParams.update(
         "figure.dpi": 300,
     }
 )
-
-TOP_N = 15  # Kept at 15 to ensure Y-axis text has plenty of breathing room
+TOP_N = 15
 
 
 def parse_args():
@@ -55,7 +56,39 @@ def parse_args():
         "-m", "--mmdb", required=True, help="Path to GeoLite2-Country.mmdb"
     )
     parser.add_argument("-o", "--outdir", default="output", help="Output directory")
+    parser.add_argument(
+        "-n",
+        "--max-packets",
+        type=int,
+        default=1000000,
+        help="Maximum number of packets to process",
+    )
     return parser.parse_args()
+
+
+def open_pcap(file_path):
+    with open(file_path, "rb") as f:
+        magic = f.read(2)
+    return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
+
+
+def get_ipv4_packet(buf, datalink):
+    try:
+        if datalink == dpkt.pcap.DLT_EN10MB:
+            eth = dpkt.ethernet.Ethernet(buf)
+            if isinstance(eth.data, dpkt.ip.IP):
+                return eth.data
+        elif datalink == dpkt.pcap.DLT_LINUX_SLL:
+            sll = dpkt.sll.SLL(buf)
+            if isinstance(sll.data, dpkt.ip.IP):
+                return sll.data
+        elif datalink in (12, 14, 101, 228):
+            ip = dpkt.ip.IP(buf)
+            if ip.v == 4:
+                return ip
+    except Exception:
+        pass
+    return None
 
 
 def lookup_country(reader, ip):
@@ -75,26 +108,43 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     out_png = os.path.join(args.outdir, "geo_country_bar.png")
 
-    print(f"[*] Opening GeoIP database: {args.mmdb}")
+    print(f"[*] Fast Streaming {args.pcap} using dpkt ...")
+    ip_packet_counts = Counter()
+    total_packets = 0
+
+    with open_pcap(args.pcap) as f:
+        pcap = dpkt.pcap.Reader(f)
+        datalink = pcap.datalink()
+        for ts, buf in pcap:
+            if total_packets >= args.max_packets:
+                print(
+                    f"[*] Reached {args.max_packets:,} packet limit. Moving to analysis..."
+                )
+                break
+
+            total_packets += 1
+            ip = get_ipv4_packet(buf, datalink)
+            if ip:
+                ip_packet_counts[ip.src] += 1
+
+    print(
+        f"[*] Lookups required reduced to {len(ip_packet_counts)} unique IPs. Opening GeoIP database..."
+    )
     try:
         reader = maxminddb.open_database(args.mmdb)
     except FileNotFoundError:
         print(f"[-] Could not find MMDB file at {args.mmdb}")
         return
 
-    print(f"[*] Streaming {args.pcap} ...")
-
     country_pkt = Counter()
     country_ip = defaultdict(set)
 
-    with PcapReader(args.pcap) as pcap_reader:
-        for pkt in pcap_reader:
-            if IP not in pkt:
-                continue
-            src = pkt[IP].src
-            c = lookup_country(reader, src)
-            country_pkt[c] += 1
-            country_ip[c].add(src)
+    # Do the DB lookups AFTER aggregating (massive speedup)
+    for src_bytes, count in ip_packet_counts.items():
+        src_str = socket.inet_ntoa(src_bytes)
+        c = lookup_country(reader, src_str)
+        country_pkt[c] += count
+        country_ip[c].add(src_bytes)
 
     reader.close()
 
@@ -106,28 +156,20 @@ def main():
         {"country": c, "packets": p, "unique_ips": len(country_ip[c])}
         for c, p in country_pkt.most_common(TOP_N)
     ]
-
     df = pd.DataFrame(rows).sort_values(by="packets", ascending=True)
 
-    # --- Plotting ---
-    # Widened figure to 14 inches to accommodate the larger annotation text
     fig, ax = plt.subplots(figsize=(14, 10))
-
     bars = ax.barh(
         df["country"], df["packets"], color="#4C72B0", edgecolor="black", alpha=0.9
     )
-
     ax.set_xlabel("Total Packet Count", labelpad=15, fontweight="bold")
     ax.set_title(f"Top Source Countries by Packet Volume", pad=20, fontweight="bold")
     ax.grid(axis="x", linestyle="--", alpha=0.5)
+    ax.set_xlim(0, max(df["packets"]) * 1.45)
 
-    # Add large text annotations on the bars
     for bar, u_ips in zip(bars, df["unique_ips"]):
         width = bar.get_width()
-
-        # Annotation text: "  X pkts | Y IPs"
         annotation = f"  {int(width):,} pkts | {u_ips:,} IPs"
-
         ax.text(
             width,
             bar.get_y() + bar.get_height() / 2,
@@ -137,9 +179,6 @@ def main():
             fontsize=16,
             color="black",
         )
-
-    # Extend x-limit heavily to ensure the large text labels fit inside the graphic bounds
-    ax.set_xlim(0, max(df["packets"]) * 1.45)
 
     plt.tight_layout()
     plt.savefig(out_png, dpi=300, bbox_inches="tight")

@@ -152,7 +152,7 @@ Reads the PCAP file iteratively and produces a single, high-quality table summar
 **Outputs:** `pcap_overview_table.png`
 
 ```bash
-python 1_pcap_overview.py -p <pcap_file> -o <output_dir>
+python 1_pcap_overview.py -p <pcap_file> -o <output_dir> -n <max_packets>
 ```
 
 ### Script 2 — `2_ics_port_analysis.py`
@@ -162,7 +162,7 @@ Identifies traffic targeting known Industrial Control System (ICS) ports and det
 **Outputs:** `ics_port_analysis.png`
 
 ```bash
-python 2_ics_port_analysis.py -p <pcap_file> -o <output_dir>
+python 2_ics_port_analysis.py -p <pcap_file> -o <output_dir> -n <max_packets>
 ```
 
 ### Script 3 — `3_entropy_burstiness.py`
@@ -172,7 +172,7 @@ Calculates mathematically reliable metrics for network telescope traffic. Comput
 **Outputs:** `entropy_diversity.png`, `burstiness_iat.png`
 
 ```bash
-python 3_entropy_burstiness.py -p <pcap_file> -o <output_dir>
+python 3_entropy_burstiness.py -p <pcap_file> -o <output_dir> -n <max_packets>
 ```
 
 ### Script 4 — `4_geo_analysis.py`
@@ -182,7 +182,7 @@ Maps source IPs to countries using a [MaxMind DB file](https://maxmind.github.io
 **Outputs:** `geo_country_bar.png`
 
 ```bash
-python 4_geo_analysis.py -p <pcap_file> -m <mmdb_file> -o <output_dir>
+python 4_geo_analysis.py -p <pcap_file> -m <mmdb_file> -o <output_dir> -n <max_packets>
 ```
 
 ### Script 5 — `5_heatmap_port_time.py`
@@ -192,19 +192,19 @@ Builds an explicitly defined, high-resolution matrix heatmap showing packet acti
 **Outputs:** `port_heatmap_matrix.png`, `port_heatmap_data.csv`
 
 ```bash
-python 5_heatmap_port_time.py -p <pcap_file> -o <output_dir>
+python 5_heatmap_port_time.py -p <pcap_file> -o <output_dir> -n <max_packets>
 ```
 
 ### Bash Script — `run_analysis.sh`
 
 **NOTE: This script must be run within a Merit VM.**
 
-Iterates through the first 7 days (1 week) of data of the specified month.
-It runs all five Python scripts on each PCAP (divided by hour), saving the
+Iterates through the specified days of data of the specified month.
+It runs all five Python scripts on the specified PCAP hours, saving the
 output into organized folders.
 
 ```bash
-./run_analysis.sh <YYYY> <MM>
+./run_analysis.sh <YYYY> <MM> <START_DAY> <END_DAY> "<HOURS>" [MAX_PACKETS]
 ```
 
 ---

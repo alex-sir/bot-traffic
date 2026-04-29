@@ -10,18 +10,18 @@ Usage Instructions:
     Run the script from the terminal, providing the path to your PCAP file.
 
     Basic usage:
-        python 2_ics_port_analysis.py -p <path_to_pcap_file>
+        python 2_ics_port_analysis.py -p <path_to_pcap_file> -n 1000000
 
     Example with custom output directory:
-        python 2_ics_port_analysis.py -p data/traffic-2025-01-20.00-1M.pcap -o output/
+        python 2_ics_port_analysis.py -p data/traffic-2025-01-20.00-1M.pcap -o output/ -n 71500000
 """
 
 import argparse
-import socket
 import struct
 import os
+import gzip
+import dpkt
 from collections import Counter, defaultdict
-from scapy.all import PcapReader, IP, TCP, UDP
 import matplotlib
 
 matplotlib.use("Agg")
@@ -62,7 +62,39 @@ def parse_args():
     parser = argparse.ArgumentParser(description="ICS Port Targeting Analysis")
     parser.add_argument("-p", "--pcap", required=True, help="Path to input PCAP")
     parser.add_argument("-o", "--outdir", default="output", help="Output directory")
+    parser.add_argument(
+        "-n",
+        "--max-packets",
+        type=int,
+        default=1000000,
+        help="Maximum number of packets to process",
+    )
     return parser.parse_args()
+
+
+def open_pcap(file_path):
+    with open(file_path, "rb") as f:
+        magic = f.read(2)
+    return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
+
+
+def get_ipv4_packet(buf, datalink):
+    try:
+        if datalink == dpkt.pcap.DLT_EN10MB:
+            eth = dpkt.ethernet.Ethernet(buf)
+            if isinstance(eth.data, dpkt.ip.IP):
+                return eth.data
+        elif datalink == dpkt.pcap.DLT_LINUX_SLL:
+            sll = dpkt.sll.SLL(buf)
+            if isinstance(sll.data, dpkt.ip.IP):
+                return sll.data
+        elif datalink in (12, 14, 101, 228):
+            ip = dpkt.ip.IP(buf)
+            if ip.v == 4:
+                return ip
+    except Exception:
+        pass
+    return None
 
 
 def main():
@@ -70,77 +102,70 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     out_file = os.path.join(args.outdir, "ics_port_analysis.png")
 
-    print(f"[*] Streaming {args.pcap} ...")
-
+    print(f"[*] Fast Streaming {args.pcap} using dpkt ...")
     ics_hits = Counter()
     dst_ips_per_port = defaultdict(list)
+    total_packets = 0
 
-    # Parse packets iteratively for ICS ports
-    with PcapReader(args.pcap) as pcap_reader:
-        for pkt in pcap_reader:
-            if IP not in pkt:
+    with open_pcap(args.pcap) as f:
+        pcap = dpkt.pcap.Reader(f)
+        datalink = pcap.datalink()
+        for ts, buf in pcap:
+            if total_packets >= args.max_packets:
+                print(
+                    f"[*] Reached {args.max_packets:,} packet limit. Moving to analysis..."
+                )
+                break
+
+            total_packets += 1
+            ip = get_ipv4_packet(buf, datalink)
+            if not ip:
                 continue
-            port = (
-                pkt[TCP].dport
-                if TCP in pkt
-                else (pkt[UDP].dport if UDP in pkt else None)
-            )
+
+            port = None
+            if ip.p in (6, 17):  # TCP or UDP
+                try:
+                    port = ip.data.dport
+                except:
+                    pass
+
             if port and port in ICS_PORTS:
                 proto = ICS_PORTS[port]
                 ics_hits[proto] += 1
-                dst_ips_per_port[proto].append(pkt[IP].dst)
+                dst_ips_per_port[proto].append(ip.dst)
 
     if not ics_hits:
         print("[-] No ICS port traffic found in the provided PCAP.")
         return
 
-    # Calculate concise patterns for each targeted protocol
     pattern_labels = {}
     for proto, ips in dst_ips_per_port.items():
         if len(ips) < 5:
             pattern_labels[proto] = "Insufficient Data"
             continue
         try:
-            int_ips = sorted(
-                set(struct.unpack("!I", socket.inet_aton(ip))[0] for ip in ips)
-            )
+            int_ips = sorted(set(struct.unpack("!I", ip_bytes)[0] for ip_bytes in ips))
             diffs = [int_ips[i + 1] - int_ips[i] for i in range(len(int_ips) - 1)]
             avg_gap = sum(diffs) / len(diffs) if diffs else 0
-
-            # Shortened labels for cleaner visualization
             pat_type = "Seq" if avg_gap <= 5 else "Rnd"
             pattern_labels[proto] = f"{pat_type} (Gap: {avg_gap:.1f})"
         except Exception:
             pattern_labels[proto] = "Error"
 
-    # --- Plotting the Chart ---
-    # Widened the figure slightly to accommodate the larger text
     fig, ax = plt.subplots(figsize=(16, 9))
-
-    # Sort data ascending so the largest bar is at the top
     sorted_hits = ics_hits.most_common()[::-1]
     protos, counts = zip(*sorted_hits)
 
-    # Create the horizontal bars
     bars = ax.barh(protos, counts, color="#8B0000", edgecolor="black", alpha=0.85)
-
     ax.set_xlabel("Packet Count", labelpad=15)
     ax.set_title("ICS Port Targeting & Scan Patterns", pad=20, fontweight="bold")
     ax.grid(axis="x", linestyle="--", alpha=0.5)
+    ax.set_xlim(0, max(counts) * 1.6)
 
-    # Extend X-axis limit significantly to ensure large text annotations fit
-    max_count = max(counts)
-    ax.set_xlim(0, max_count * 1.6)
-
-    # Annotate each bar with the concise packet count and calculated scanning pattern
     for bar, proto, count in zip(bars, protos, counts):
         width = bar.get_width()
         pattern_text = pattern_labels.get(proto, "N/A")
-
-        # Highly concise annotation string
         annotation = f"  {count:,} pkts | {pattern_text}"
-
-        # Place text to the right of the bar with a large font
         ax.text(
             width,
             bar.get_y() + bar.get_height() / 2,

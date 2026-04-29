@@ -11,22 +11,23 @@ Usage Instructions:
     Run the script from the terminal, providing the path to your PCAP file.
 
     Basic usage:
-        python 3_entropy_burstiness.py -p <path_to_pcap_file>
+        python 3_entropy_burstiness.py -p <path_to_pcap_file> -n 1000000
 
     Example with custom output directory:
-        python 3_entropy_burstiness.py -p data/traffic.pcap -o output/
+        python 3_entropy_burstiness.py -p data/traffic.pcap -o output/ -n 71500000
 """
 
 import argparse
 import math
 import os
+import gzip
+import dpkt
 from collections import Counter
 import numpy as np
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from scapy.all import PcapReader, IP, TCP, UDP
 
 plt.rcParams.update(
     {
@@ -48,16 +49,46 @@ def parse_args():
     )
     parser.add_argument("-p", "--pcap", required=True, help="Path to input PCAP")
     parser.add_argument("-o", "--outdir", default="output", help="Output directory")
+    parser.add_argument(
+        "-n",
+        "--max-packets",
+        type=int,
+        default=1000000,
+        help="Maximum number of packets to process",
+    )
     return parser.parse_args()
 
 
+def open_pcap(file_path):
+    with open(file_path, "rb") as f:
+        magic = f.read(2)
+    return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
+
+
+def get_ipv4_packet(buf, datalink):
+    try:
+        if datalink == dpkt.pcap.DLT_EN10MB:
+            eth = dpkt.ethernet.Ethernet(buf)
+            if isinstance(eth.data, dpkt.ip.IP):
+                return eth.data
+        elif datalink == dpkt.pcap.DLT_LINUX_SLL:
+            sll = dpkt.sll.SLL(buf)
+            if isinstance(sll.data, dpkt.ip.IP):
+                return sll.data
+        elif datalink in (12, 14, 101, 228):
+            ip = dpkt.ip.IP(buf)
+            if ip.v == 4:
+                return ip
+    except Exception:
+        pass
+    return None
+
+
 def calc_entropy(counter):
-    """Calculates actual Shannon Entropy and Theoretical Maximum Entropy."""
     total = sum(counter.values())
     unique_count = len(counter)
     if total == 0 or unique_count == 0:
         return 0.0, 0.0
-
     entropy = -sum(
         (c / total) * math.log2(c / total) for c in counter.values() if c > 0
     )
@@ -71,42 +102,44 @@ def main():
     out_entropy = os.path.join(args.outdir, "entropy_diversity.png")
     out_burst = os.path.join(args.outdir, "burstiness_iat.png")
 
-    print(f"[*] Streaming {args.pcap} ...")
-
-    src_ips = Counter()
-    dst_ports = Counter()
+    print(f"[*] Fast Streaming {args.pcap} using dpkt ...")
+    src_ips, dst_ports = Counter(), Counter()
     timestamps = []
     total_packets = 0
 
-    # 1. Extract Data Iteratively
-    with PcapReader(args.pcap) as pcap_reader:
-        for pkt in pcap_reader:
+    with open_pcap(args.pcap) as f:
+        pcap = dpkt.pcap.Reader(f)
+        datalink = pcap.datalink()
+        for ts, buf in pcap:
+            if total_packets >= args.max_packets:
+                print(
+                    f"[*] Reached {args.max_packets:,} packet limit. Moving to analysis..."
+                )
+                break
+
             total_packets += 1
-            timestamps.append(float(pkt.time))
-            if IP in pkt:
-                src_ips[pkt[IP].src] += 1
-                if TCP in pkt:
-                    dst_ports[pkt[TCP].dport] += 1
-                elif UDP in pkt:
-                    dst_ports[pkt[UDP].dport] += 1
+            timestamps.append(ts)
+            ip = get_ipv4_packet(buf, datalink)
+            if ip:
+                src_ips[ip.src] += 1
+                if ip.p in (6, 17):
+                    try:
+                        dst_ports[ip.data.dport] += 1
+                    except:
+                        pass
 
     if total_packets < 2:
         print("[-] Not enough packets to analyze burstiness.")
         return
 
-    # 2. Calculate Inter-Arrival Times (Burstiness)
     timestamps.sort()
     iats = np.diff(timestamps)
-
-    mean_iat = np.mean(iats)
-    std_iat = np.std(iats)
+    mean_iat, std_iat = np.mean(iats), np.std(iats)
     cv_iat = std_iat / mean_iat if mean_iat > 0 else 0
 
-    # 3. Calculate Global Entropy
     ip_ent, ip_max = calc_entropy(src_ips)
     port_ent, port_max = calc_entropy(dst_ports)
 
-    # --- Print Hard Numbers to Terminal ---
     print("\n--- Reliable Traffic Metrics ---")
     print(f"Total Packets:     {total_packets:,}")
     print(f"Mean IAT:          {mean_iat:.5f} seconds")
@@ -114,17 +147,14 @@ def main():
     print(f"Source IP Entropy: {ip_ent:.3f} bits (Max: {ip_max:.3f})")
     print(f"Dest Port Entropy: {port_ent:.3f} bits (Max: {port_max:.3f})\n")
 
-    # ==========================================
-    # GRAPH 1: Entropy (Traffic Diversity)
-    # ==========================================
+    # GRAPH 1: Entropy
     fig1, ax1 = plt.subplots(figsize=(10, 8))
-
-    labels = ["Source IPs", "Destination Ports"]
-    actual_vals = [ip_ent, port_ent]
-    max_vals = [ip_max, port_max]
-
-    x = np.arange(len(labels))
-    width = 0.35
+    labels, actual_vals, max_vals = (
+        ["Source IPs", "Destination Ports"],
+        [ip_ent, port_ent],
+        [ip_max, port_max],
+    )
+    x, width = np.arange(len(labels)), 0.35
 
     ax1.bar(
         x - width / 2,
@@ -145,18 +175,14 @@ def main():
         hatch="//",
         linewidth=1.5,
     )
-
     ax1.set_ylabel("Shannon Entropy (Bits)", fontweight="bold", labelpad=15)
     ax1.set_title("Traffic Diversity (Actual vs. Maximum)", pad=20, fontweight="bold")
     ax1.set_xticks(x)
     ax1.set_xticklabels(labels, fontweight="bold")
     ax1.grid(axis="y", linestyle="--", alpha=0.7)
-
     ax1.set_ylim(0, max(max_vals) * 1.35)
-
     ax1.legend(loc="upper right", framealpha=0.9, edgecolor="black", borderpad=0.8)
 
-    # Add large numeric annotations to the bars
     for i, v in enumerate(actual_vals):
         ax1.text(
             i - width / 2,
@@ -180,17 +206,12 @@ def main():
 
     plt.tight_layout()
     plt.savefig(out_entropy, dpi=300, bbox_inches="tight")
-    print(f"[+] Entropy graph saved to {out_entropy}")
     plt.close(fig1)
 
-    # ==========================================
-    # GRAPH 2: Burstiness (Inter-Arrival Time)
-    # ==========================================
+    # GRAPH 2: Burstiness
     fig2, ax2 = plt.subplots(figsize=(12, 8))
-
     iats_ms = iats * 1000
     bins = np.logspace(np.log10(max(0.001, min(iats_ms))), np.log10(max(iats_ms)), 50)
-
     ax2.hist(
         iats_ms,
         bins=bins,
@@ -199,24 +220,21 @@ def main():
         alpha=0.85,
         linewidth=1.2,
     )
-
     ax2.set_xscale("log")
     ax2.set_yscale("log")
-
     ax2.set_xlabel(
         "Time Between Packets (Milliseconds, Log Scale)", fontweight="bold", labelpad=15
     )
     ax2.set_ylabel("Frequency (Log Scale)", fontweight="bold", labelpad=15)
-
-    burst_text = f"Burstiness (CV): {cv_iat:.2f} | Mean Gap: {mean_iat * 1000:.1f} ms"
     ax2.set_title(
-        f"Inter-Arrival Time Distribution\n[{burst_text}]", pad=20, fontweight="bold"
+        f"Inter-Arrival Time Distribution\n[Burstiness (CV): {cv_iat:.2f} | Mean Gap: {mean_iat * 1000:.1f} ms]",
+        pad=20,
+        fontweight="bold",
     )
     ax2.grid(True, linestyle=":", alpha=0.7)
 
     plt.tight_layout()
     plt.savefig(out_burst, dpi=300, bbox_inches="tight")
-    print(f"[+] Burstiness graph saved to {out_burst}")
     plt.close(fig2)
 
 
