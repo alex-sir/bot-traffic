@@ -27,12 +27,15 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+# --- STANDARDIZED FONT CONFIGURATION ---
 plt.rcParams.update(
     {
-        "font.size": 20,
+        "font.size": 22,
         "font.family": "serif",
-        "axes.labelsize": 22,
-        "axes.titlesize": 24,
+        "axes.labelsize": 26,
+        "xtick.labelsize": 22,
+        "ytick.labelsize": 22,
+        "legend.fontsize": 22,
         "figure.dpi": 300,
     }
 )
@@ -157,12 +160,9 @@ def main():
     protos, counts = zip(*sorted_hits)
 
     bars = ax.barh(protos, counts, color="#8B0000", edgecolor="black", alpha=0.85)
-    ax.set_xlabel("Packet Count", labelpad=15)
-    ax.set_title(
-        "ICS Port Targeting & Scan Patterns (Aggregated)", pad=20, fontweight="bold"
-    )
+    ax.set_xlabel("Packet Count", labelpad=15, fontweight="bold")
     ax.grid(axis="x", linestyle="--", alpha=0.5)
-    ax.set_xlim(0, max(counts) * 1.6)
+    ax.set_xlim(0, max(counts) * 1.8)
 
     for bar, proto, count in zip(bars, protos, counts):
         width = bar.get_width()
@@ -174,7 +174,7 @@ def main():
             annotation,
             va="center",
             ha="left",
-            fontsize=18,
+            fontsize=22,  # Updated to match standardized fonts
             color="black",
         )
 

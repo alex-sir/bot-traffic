@@ -36,16 +36,19 @@ except ImportError:
     print("[!] Install maxminddb-reader-python:  pip install maxminddb")
     sys.exit(1)
 
+# --- STANDARDIZED FONT CONFIGURATION ---
 plt.rcParams.update(
     {
-        "font.size": 18,
+        "font.size": 22,
         "font.family": "serif",
-        "axes.labelsize": 20,
-        "axes.titlesize": 24,
-        "ytick.labelsize": 18,
+        "axes.labelsize": 26,
+        "xtick.labelsize": 22,
+        "ytick.labelsize": 22,
+        "legend.fontsize": 22,
         "figure.dpi": 300,
     }
 )
+
 TOP_N = 15
 
 
@@ -160,11 +163,8 @@ def main():
         df["country"], df["packets"], color="#4C72B0", edgecolor="black", alpha=0.9
     )
     ax.set_xlabel("Total Packet Count", labelpad=15, fontweight="bold")
-    ax.set_title(
-        f"Top Source Countries by Packet Volume (Aggregated)", pad=20, fontweight="bold"
-    )
     ax.grid(axis="x", linestyle="--", alpha=0.5)
-    ax.set_xlim(0, max(df["packets"]) * 1.45)
+    ax.set_xlim(0, max(df["packets"]) * 2)
 
     for bar, u_ips in zip(bars, df["unique_ips"]):
         width = bar.get_width()
@@ -175,7 +175,7 @@ def main():
             annotation,
             va="center",
             ha="left",
-            fontsize=16,
+            fontsize=22,  # Updated to match standardized fonts
             color="black",
         )
 

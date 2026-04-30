@@ -26,7 +26,18 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-plt.rcParams.update({"font.family": "serif", "figure.dpi": 300})
+# --- STANDARDIZED FONT CONFIGURATION ---
+plt.rcParams.update(
+    {
+        "font.size": 22,
+        "font.family": "serif",
+        "axes.labelsize": 26,
+        "xtick.labelsize": 22,
+        "ytick.labelsize": 22,
+        "legend.fontsize": 22,
+        "figure.dpi": 300,
+    }
+)
 
 
 def parse_args():
@@ -43,6 +54,9 @@ def parse_args():
 
 
 # --- HELPER: Transparent Compressed File Handling ---
+# Network telescope data is massive and almost always stored as .pcap.gz.
+# This reads the first two "magic bytes" to determine if the file is gzipped.
+# If it is, it opens it with gzip.open; otherwise, it falls back to standard open.
 def open_pcap(file_path):
     with open(file_path, "rb") as f:
         magic = f.read(2)
@@ -50,6 +64,9 @@ def open_pcap(file_path):
 
 
 # --- HELPER: Datalink Layer Parsing ---
+# dpkt is extremely fast because it is "dumb" - it doesn't automatically figure out
+# the OSI layer structure like Scapy does. We have to manually check the datalink
+# type (Ethernet, Linux Cooked Capture, or Raw IP) to correctly extract the IPv4 layer.
 def get_ipv4_packet(buf, datalink):
     try:
         if datalink == dpkt.pcap.DLT_EN10MB:
@@ -163,19 +180,21 @@ def main():
         ["Dominant Protocol", f"{dominant_proto}"],
         ["Unique Source IPs", f"{len(src_ips):,}"],
         ["Unique Destination IPs", f"{len(dst_ips):,}"],
+        ["Unique Destination Ports", f"{len(dst_ports):,}"],
     ]
 
     table = ax.table(
         cellText=table_data, colLabels=["Metric", "Value"], loc="center", cellLoc="left"
     )
     table.auto_set_font_size(False)
-    table.set_fontsize(14)
-    table.scale(1, 2.2)
+    table.set_fontsize(17)  # Standardized font size applied to the table
+    table.scale(1, 3.0)
 
+    # Cell styling block (colors, weights, etc.)
     for (row, col), cell in table.get_celld().items():
         cell.set_edgecolor("#DDDDDD")
         if row == 0:
-            cell.set_text_props(weight="bold", color="white", size=15)
+            cell.set_text_props(weight="bold", color="white", size=24)
             cell.set_facecolor("#2B475D")
             cell.set_text_props(ha="center")
         else:
@@ -186,12 +205,6 @@ def main():
                 cell.set_text_props(ha="right")
         cell.PAD = 0.05
 
-    plt.title(
-        "Merit Network Telescope Traffic Summary (Aggregated)",
-        fontsize=18,
-        fontweight="bold",
-        pad=20,
-    )
     plt.tight_layout()
     plt.savefig(out_file, dpi=300, bbox_inches="tight")
     print(f"[+] Summary table saved to {out_file}")

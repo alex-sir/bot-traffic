@@ -30,14 +30,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
+# --- STANDARDIZED FONT CONFIGURATION ---
 plt.rcParams.update(
     {
         "font.size": 22,
         "font.family": "serif",
         "axes.labelsize": 26,
-        "axes.titlesize": 30,
-        "xtick.labelsize": 20,
+        "xtick.labelsize": 22,
         "ytick.labelsize": 22,
+        "legend.fontsize": 22,
         "figure.dpi": 300,
     }
 )
@@ -197,10 +198,6 @@ def main():
     )
     ax.set_xlabel("Time Bins (UTC, 1-Hour Intervals)", labelpad=20, fontweight="bold")
 
-    ax.set_title(
-        "Port Activity Matrix (Hits per Hour, Aggregated)", pad=25, fontweight="bold"
-    )
-
     # Text Overlay Guard: Only draw physical numbers inside the cells if the matrix isn't incredibly wide
     if len(all_bins) <= 48:
         for i in range(len(port_keys)):
@@ -219,7 +216,7 @@ def main():
                         ha="center",
                         va="center",
                         color=text_color,
-                        fontsize=18,
+                        fontsize=22,  # Updated to match standardized fonts
                         fontweight="bold",
                     )
 
@@ -229,9 +226,9 @@ def main():
         rotation=270,
         labelpad=30,
         fontweight="bold",
-        fontsize=24,
+        fontsize=26,  # Matched to axes.labelsize
     )
-    cbar.ax.tick_params(labelsize=20)
+    cbar.ax.tick_params(labelsize=22)  # Matched to xtick/ytick labelsize
 
     plt.tight_layout()
     plt.savefig(out_png, dpi=300, bbox_inches="tight")

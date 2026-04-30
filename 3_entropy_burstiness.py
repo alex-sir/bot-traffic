@@ -29,15 +29,15 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+# --- STANDARDIZED FONT CONFIGURATION ---
 plt.rcParams.update(
     {
-        "font.size": 20,
+        "font.size": 22,
         "font.family": "serif",
-        "axes.labelsize": 22,
-        "axes.titlesize": 26,
-        "xtick.labelsize": 18,
-        "ytick.labelsize": 18,
-        "legend.fontsize": 18,
+        "axes.labelsize": 26,
+        "xtick.labelsize": 22,
+        "ytick.labelsize": 22,
+        "legend.fontsize": 22,
         "figure.dpi": 300,
     }
 )
@@ -173,7 +173,6 @@ def main():
         linewidth=1.5,
     )
     ax1.set_ylabel("Shannon Entropy (Bits)", fontweight="bold", labelpad=15)
-    ax1.set_title("Traffic Diversity (Aggregated)", pad=20, fontweight="bold")
     ax1.set_xticks(x)
     ax1.set_xticklabels(labels, fontweight="bold")
     ax1.grid(axis="y", linestyle="--", alpha=0.7)
@@ -188,7 +187,7 @@ def main():
             ha="center",
             va="bottom",
             fontweight="bold",
-            fontsize=18,
+            fontsize=22,  # Updated to match standardized fonts
         )
     for i, v in enumerate(max_vals):
         ax1.text(
@@ -198,7 +197,7 @@ def main():
             ha="center",
             va="bottom",
             color="#555555",
-            fontsize=18,
+            fontsize=22,  # Updated to match standardized fonts
         )
 
     plt.tight_layout()
@@ -224,11 +223,6 @@ def main():
         "Time Between Packets (Milliseconds, Log Scale)", fontweight="bold", labelpad=15
     )
     ax2.set_ylabel("Frequency (Log Scale)", fontweight="bold", labelpad=15)
-    ax2.set_title(
-        f"Inter-Arrival Time Distribution (Aggregated)\n[Burstiness (CV): {cv_iat:.2f} | Mean Gap: {mean_iat * 1000:.1f} ms]",
-        pad=20,
-        fontweight="bold",
-    )
     ax2.grid(True, linestyle=":", alpha=0.7)
 
     plt.tight_layout()
