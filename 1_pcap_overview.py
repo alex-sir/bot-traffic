@@ -3,7 +3,7 @@ Script 1: PCAP Overview & Basic Statistics Summary
 
 This script reads a PCAP file iteratively and produces a single, high-quality,
 table summarizing the core metrics of the network traffic,
-including data volume and packet rates.
+including data volume, packet rates, and ICS vs Non-ICS traffic proportions.
 
 Usage Instructions:
     Run the script from the terminal, providing the path to your PCAP file.
@@ -39,6 +39,27 @@ plt.rcParams.update(
     }
 )
 
+# Reference dictionary for identifying Industrial Control System ports
+ICS_PORTS = {
+    502: "Modbus",
+    20000: "DNP3",
+    44818: "EtherNet/IP",
+    2222: "EtherNet/IP (alt)",
+    102: "S7/ISO-TSAP",
+    4840: "OPC UA",
+    1089: "FF Fieldbus HSE",
+    1090: "FF Fieldbus HSE",
+    1091: "FF Fieldbus HSE",
+    2404: "IEC 60870-5-104",
+    20547: "ProConOS",
+    1962: "PCWorx",
+    789: "Red Lion",
+    9600: "OMRON FINS",
+    47808: "BACnet",
+    161: "SNMP (ICS mgmt)",
+    162: "SNMP trap",
+}
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="PCAP Overview & Basic Statistics")
@@ -54,9 +75,6 @@ def parse_args():
 
 
 # --- HELPER: Transparent Compressed File Handling ---
-# Network telescope data is massive and almost always stored as .pcap.gz.
-# This reads the first two "magic bytes" to determine if the file is gzipped.
-# If it is, it opens it with gzip.open; otherwise, it falls back to standard open.
 def open_pcap(file_path):
     with open(file_path, "rb") as f:
         magic = f.read(2)
@@ -64,9 +82,6 @@ def open_pcap(file_path):
 
 
 # --- HELPER: Datalink Layer Parsing ---
-# dpkt is extremely fast because it is "dumb" - it doesn't automatically figure out
-# the OSI layer structure like Scapy does. We have to manually check the datalink
-# type (Ethernet, Linux Cooked Capture, or Raw IP) to correctly extract the IPv4 layer.
 def get_ipv4_packet(buf, datalink):
     try:
         if datalink == dpkt.pcap.DLT_EN10MB:
@@ -93,10 +108,10 @@ def main():
 
     # Global tracking variables across all files
     total_packets, total_bytes = 0, 0
+    ics_packets = 0
     protocols, src_ips, dst_ips, dst_ports = Counter(), Counter(), Counter(), Counter()
 
     # We must track active duration (time spent actually capturing) rather than absolute duration
-    # to avoid the 11-hour "dead" gaps destroying our Packet Rate metric.
     active_duration_sec = 0
     t_start = None
 
@@ -125,22 +140,30 @@ def main():
                     src_ips[ip.src] += 1
                     dst_ips[ip.dst] += 1
 
+                    port = None
                     if ip.p == 6:
                         protocols["TCP"] += 1
                         try:
-                            dst_ports[ip.data.dport] += 1
+                            port = ip.data.dport
+                            dst_ports[port] += 1
                         except:
                             pass
                     elif ip.p == 17:
                         protocols["UDP"] += 1
                         try:
-                            dst_ports[ip.data.dport] += 1
+                            port = ip.data.dport
+                            dst_ports[port] += 1
                         except:
                             pass
                     elif ip.p == 1:
                         protocols["ICMP"] += 1
                     else:
                         protocols["Other"] += 1
+
+                    # Check if the extracted port targets critical infrastructure
+                    if port and port in ICS_PORTS:
+                        ics_packets += 1
+
                 else:
                     protocols["Non-IP"] += 1
 
@@ -164,6 +187,13 @@ def main():
     pkt_rate = total_packets / active_duration_sec
     dominant_proto = protocols.most_common(1)[0][0] if protocols else "N/A"
 
+    # Calculate the percentage of traffic dedicated to ICS scanning vs Non-ICS
+    ics_percentage = (ics_packets / total_packets) * 100 if total_packets > 0 else 0
+    non_ics_packets = total_packets - ics_packets
+    non_ics_percentage = (
+        (non_ics_packets / total_packets) * 100 if total_packets > 0 else 0
+    )
+
     # --- PHASE 3: Visualization ---
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.axis("tight")
@@ -178,6 +208,8 @@ def main():
         ["Average Packet Rate", f"{pkt_rate:.2f} pkts/sec"],
         ["Average Bandwidth", f"{bandwidth_mbps:.3f} Mbps"],
         ["Dominant Protocol", f"{dominant_proto}"],
+        ["ICS Port Traffic", f"{ics_percentage:.4f}% ({ics_packets:,} pkts)"],
+        ["Non-ICS Traffic", f"{non_ics_percentage:.4f}% ({non_ics_packets:,} pkts)"],
         ["Unique Source IPs", f"{len(src_ips):,}"],
         ["Unique Destination IPs", f"{len(dst_ips):,}"],
         ["Unique Destination Ports", f"{len(dst_ports):,}"],
@@ -188,7 +220,7 @@ def main():
     )
     table.auto_set_font_size(False)
     table.set_fontsize(17)  # Standardized font size applied to the table
-    table.scale(1, 3.0)
+    table.scale(1.2, 3.0)  # Horizontal scaling to fit the long timestamp string
 
     # Cell styling block (colors, weights, etc.)
     for (row, col), cell in table.get_celld().items():
