@@ -195,6 +195,28 @@ Builds an explicitly defined, high-resolution matrix heatmap showing packet acti
 python 5_heatmap_port_time.py -p <pcap_file> -o <output_dir> -n <max_packets>
 ```
 
+### Script 6 — `6_ids_timeseries.py`
+
+**Topic: Anomaly-Based IDS Simulation**
+Extracts the raw packet volume per 1-second interval across all provided PCAP files.
+This generates the foundational data needed to simulate an anomaly-based IDS.
+**Outputs:** `ids_timeseries_1sec.csv`
+
+```bash
+python 6_ids_timeseries.py -p <pcap_file> -o <output_dir> -n <max_packets>
+```
+
+### Script 7 — `7_evaluate_ids.py`
+
+**Topic: Anomaly-Based IDS Simulation**
+Compares a test traffic timeline against a strict IDS baseline established by
+historical traffic, proving the degradation of standard thresholding.
+**Outputs:** `ids_degradation.png`
+
+```bash
+python 7_evaluate_ids.py -b <baseline_csv> -t <test_csv> -o <output_dir> --baseline-label "Baseline Traffic" --test-label "Test Traffic"
+```
+
 ### Bash Script — `run_analysis.sh`
 
 **NOTE: This script must be run within a Merit VM.**
@@ -213,13 +235,15 @@ output into organized folders.
 
 | File                      | Produced by | Description                                      |
 | ------------------------- | ----------- | ------------------------------------------------ |
-| `pcap_overview_table.png` | Script 1    | Core metrics and basic statistics summary table  |
+| `pcap_overview_table.png` | Script 1    | Core metrics and statistics summary table        |
 | `ics_port_analysis.png`   | Script 2    | ICS port targeting and scanning pattern chart    |
 | `entropy_diversity.png`   | Script 3    | Global Shannon entropy chart (Actual vs Maximum) |
 | `burstiness_iat.png`      | Script 3    | Inter-Arrival Time (IAT) distribution histogram  |
 | `geo_country_bar.png`     | Script 4    | Top source countries bar chart with IP counts    |
 | `port_heatmap_matrix.png` | Script 5    | Annotated ICS port activity matrix               |
 | `port_heatmap_data.csv`   | Script 5    | Raw CSV data for the heatmap matrix              |
+| `ids_timeseries_1sec.csv` | Script 6    | Raw CSV data for the IDS simulation analysis     |
+| `ids_degradation.png`     | Script 7    | IDS simulation results chart                     |
 
 ---
 
@@ -230,9 +254,13 @@ output into organized folders.
 3. Script 3 (entropy/burstiness metrics)
 4. Script 4 (geo analysis)
 5. Script 5 (heatmap visualization)
+6. Script 6 (IDS time-series data)
+7. Script 7 (IDS simulation results)
 
-The bash script `run_analysis.sh` runs the Python scripts in
-this order.
+The bash script `run_analysis.sh` runs Python scripts 1-6 in
+this order. **Script 7 must be run manually from the terminal**.
+It is recommended to run script 7 after `run_analysis.sh`
+finishes generating all of its output.
 
 ## Contributors
 

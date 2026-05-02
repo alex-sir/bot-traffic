@@ -70,6 +70,7 @@ python 2_ics_port_analysis.py -p "$PCAP_LIST" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 python 3_entropy_burstiness.py -p "$PCAP_LIST" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 python 4_geo_analysis.py -p "$PCAP_LIST" -m "$MMDB_PATH" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 python 5_heatmap_port_time.py -p "$PCAP_LIST" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+python 6_ids_timeseries.py -p "$PCAP_LIST" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 
 echo "==================================================="
 echo "[*] Combined processing successfully completed!"

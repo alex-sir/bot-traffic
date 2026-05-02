@@ -220,7 +220,7 @@ def main():
     )
     table.auto_set_font_size(False)
     table.set_fontsize(17)  # Standardized font size applied to the table
-    table.scale(1.2, 3.0)  # Horizontal scaling to fit the long timestamp string
+    table.scale(1.2, 2.25)  # Horizontal scaling to fit the long timestamp string
 
     # Cell styling block (colors, weights, etc.)
     for (row, col), cell in table.get_celld().items():
