@@ -81,17 +81,17 @@ LABEL2="${YEAR2} Bot Traffic"
 
 # 3. Run the scripts, passing both datasets and their labels simultaneously
 # Note: PCAP variables are intentionally unquoted to allow argparse nargs='+' to read them as lists
-python 1_pcap_overview.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+python3 1_pcap_overview.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 
-python 2_ics_port_analysis.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+python3 2_ics_port_analysis.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 
-python 3_entropy_burstiness.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+python3 3_entropy_burstiness.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 
-python 4_geo_analysis.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -m1 "$MMDB_PATH1" -m2 "$MMDB_PATH2" -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+python3 4_geo_analysis.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -m1 "$MMDB_PATH1" -m2 "$MMDB_PATH2" -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 
-python 5_heatmap_port_time.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+python3 5_heatmap_port_time.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 
-python 6_ids_timeseries.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+python3 6_ids_timeseries.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 
 echo "==================================================="
 echo "[+] Combined processing successfully completed!"

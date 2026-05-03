@@ -10,17 +10,17 @@ Usage Instructions:
     files and the paths to the MaxMind GeoLite2-Country.mmdb files.
 
     Basic usage:
-        python 4_geo_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                 -m1 data/GeoLite2-2021.mmdb -m2 data/GeoLite2-2025.mmdb \
-                                 -l1 "2021" -l2 "2025"
-                                 -n 1000000
+        python3 4_geo_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                  -m1 data/GeoLite2-2021.mmdb -m2 data/GeoLite2-2025.mmdb \
+                                  -l1 "2021" -l2 "2025"
+                                  -n 1000000
 
     Example with custom output directory:
-        python 4_geo_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                 -m1 data/GeoLite2-2021.mmdb -m2 data/GeoLite2-2025.mmdb \
-                                 -l1 "2021" -l2 "2025"
-                                 -o output/
-                                 -n 1000000
+        python3 4_geo_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                  -m1 data/GeoLite2-2021.mmdb -m2 data/GeoLite2-2025.mmdb \
+                                  -l1 "2021" -l2 "2025"
+                                  -o output/
+                                  -n 1000000
 """
 
 import argparse

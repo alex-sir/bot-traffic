@@ -8,15 +8,15 @@ Usage Instructions:
     Run the script from the terminal, providing the paths to your PCAP files.
 
     Basic usage:
-        python 3_entropy_burstiness.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                       -l1 "2021" -l2 "2025" \
-                                       -n 1000000
+        python3 3_entropy_burstiness.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                        -l1 "2021" -l2 "2025" \
+                                        -n 1000000
 
     Example with custom output directory:
-        python 3_entropy_burstiness.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                       -l1 "2021" -l2 "2025" \
-                                       -o output/ \
-                                       -n 1000000
+        python3 3_entropy_burstiness.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                        -l1 "2021" -l2 "2025" \
+                                        -o output/ \
+                                        -n 1000000
 """
 
 import argparse

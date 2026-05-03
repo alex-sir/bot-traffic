@@ -10,15 +10,15 @@ Usage Instructions:
     Run the script from the terminal, providing paths to both sets of PCAP files.
 
     Basic usage:
-        python 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
-                                      -l1 "2021" -l2 "2025" \
-                                      -n 1000000
+        python3 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
+                                       -l1 "2021" -l2 "2025" \
+                                       -n 1000000
 
     Example with custom output directory:
-        python 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
-                                      -l1 "2021" -l2 "2025" \
-                                      -o output/ \
-                                      -n 1000000
+        python3 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
+                                       -l1 "2021" -l2 "2025" \
+                                       -o output/ \
+                                       -n 1000000
 """
 
 import argparse

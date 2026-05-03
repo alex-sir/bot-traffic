@@ -113,6 +113,37 @@ You can also copy over your local version of the repository using `scp`:
 scp -r ./bot-traffic merit-vm:~/code
 ```
 
+## How to Run the Python Scripts in Merit VM
+
+Installation of the packages required to run the scripts requires the use of
+**pip**. Since pip is not installed in the Merit VM, we will instead use
+**Miniconda**. This downloads a completely isolated version of Python and pip
+into your user folder. Follow these steps to set up Miniconda:
+
+Download the Miniconda installer:
+
+```bash
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+```
+
+Run the installer into your home directory:
+
+```bash
+bash Miniconda3-latest-Linux-x86_64.sh -b -p $HOME/miniconda
+```
+
+Activate the isolated environment:
+
+```bash
+source $HOME/miniconda/bin/activate
+```
+
+Install the required packages (run in the root project directory):
+
+```bash
+pip install -r requirements.txt
+```
+
 ## Test Data Setup
 
 It is preferable to test out the scripts and analysis with local data first.
@@ -132,11 +163,14 @@ Now, just copy all of your data files to this directory (`.pcap`, `.mmdb`, etc).
 The scripts produce output files (`.png`, `.csv`), so a directory is required
 to store these files. Store output files in the `output` directory within this project.
 
-- Create the `output` directory (Linux):
+Create the `output` directory (Linux):
 
 ```bash
 mkdir output
 ```
+
+If the `output` directory does not exist once you start running the Python scripts,
+it is created automatically by the scripts.
 
 ## Scripts
 
@@ -153,7 +187,7 @@ Reads two distinct sets of PCAP files iteratively and produces a single, high-qu
 **Outputs:** `pcap_overview.png`
 
 ```bash
-python 1_pcap_overview.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
+python3 1_pcap_overview.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 2 — `2_ics_port_analysis.py`
@@ -163,7 +197,7 @@ Identifies traffic targeting known Industrial Control System (ICS) ports and det
 **Outputs:** `ics_ports.png`
 
 ```bash
-python 2_ics_port_analysis.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
+python3 2_ics_port_analysis.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 3 — `3_entropy_burstiness.py`
@@ -173,7 +207,7 @@ Calculates statistical metrics across both datasets. Outputs a grouped bar chart
 **Outputs:** `entropy.png`, `burstiness.png`
 
 ```bash
-python 3_entropy_burstiness.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
+python3 3_entropy_burstiness.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 4 — `4_geo_analysis.py`
@@ -183,7 +217,7 @@ Maps source IPs to countries using MaxMind DB files for their respective years. 
 **Outputs:** `geo_analysis.png`
 
 ```bash
-python 4_geo_analysis.py -p1 <pcap_dir1> -p2 <pcap_dir2> -m1 <mmdb_file1> -m2 <mmdb_file2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
+python3 4_geo_analysis.py -p1 <pcap_dir1> -p2 <pcap_dir2> -m1 <mmdb_file1> -m2 <mmdb_file2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 5 — `5_heatmap_port_time.py`
@@ -193,7 +227,7 @@ Builds an explicitly defined, high-resolution Delta "Difference Matrix" heatmap.
 **Outputs:** `ics_heatmap_delta.png`, `ics_heatmap_delta.csv`
 
 ```bash
-python 5_heatmap_port_time.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
+python3 5_heatmap_port_time.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 6 — `6_ids_timeseries.py`
@@ -204,7 +238,7 @@ This generates the foundational CSV data needed for both datasets to simulate an
 **Outputs:** `<label1>_ids_timeseries_1sec.csv`, `<label2>_ids_timeseries_1sec.csv`
 
 ```bash
-python 6_ids_timeseries.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
+python3 6_ids_timeseries.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 7 — `7_evaluate_ids.py`
@@ -215,7 +249,7 @@ historical traffic, proving the degradation of standard thresholding.
 **Outputs:** `ids_degradation.png`
 
 ```bash
-python 7_evaluate_ids.py -b <baseline_csv> -t <test_csv> -o <output_dir> --baseline-label "Baseline Traffic" --test-label "Test Traffic"
+python3 7_evaluate_ids.py -b <baseline_csv> -t <test_csv> -o <output_dir> --baseline-label "Baseline Traffic" --test-label "Test Traffic"
 ```
 
 ### Bash Script — `run_analysis.sh`

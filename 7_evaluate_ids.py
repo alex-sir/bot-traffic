@@ -8,17 +8,17 @@ Usage Instructions:
     Run the script from the terminal, providing the paths to the CSV files.
 
     Basic usage:
-        python 7_evaluate_ids.py -b path/to/baseline/ids_timeseries_1sec.csv \
-                                 -t path/to/test/ids_timeseries_1sec.csv \
-                                 --baseline-label "2021" \
-                                 --test-label "2025"
+        python3 7_evaluate_ids.py -b path/to/baseline/ids_timeseries_1sec.csv \
+                                  -t path/to/test/ids_timeseries_1sec.csv \
+                                  --baseline-label "2021" \
+                                  --test-label "2025"
 
     Example with custom output directory:
-        python 7_evaluate_ids.py -b path/to/baseline/ids_timeseries_1sec.csv \
-                                 -t path/to/test/ids_timeseries_1sec.csv \
-                                 -o output/ \
-                                 --baseline-label "2021" \
-                                 --test-label "2025"
+        python3 7_evaluate_ids.py -b path/to/baseline/ids_timeseries_1sec.csv \
+                                  -t path/to/test/ids_timeseries_1sec.csv \
+                                  -o output/ \
+                                  --baseline-label "2021" \
+                                  --test-label "2025"
 """
 
 import argparse

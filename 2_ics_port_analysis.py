@@ -10,15 +10,15 @@ Usage Instructions:
     Run the script from the terminal, providing the paths to your PCAP files.
 
     Basic usage:
-        python 2_ics_port_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                      -l1 "2021" -l2 "2025" \
-                                      -n 1000000
+        python3 2_ics_port_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                       -l1 "2021" -l2 "2025" \
+                                       -n 1000000
 
     Example with custom output directory:
-        python 2_ics_port_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                      -l1 "2021 Baseline" -l2 "2025 Bot Traffic" \
-                                      -o output/ \
-                                      -n 1000000
+        python3 2_ics_port_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                       -l1 "2021 Baseline" -l2 "2025 Bot Traffic" \
+                                       -o output/ \
+                                       -n 1000000
 """
 
 import argparse
