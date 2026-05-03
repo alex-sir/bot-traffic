@@ -9,13 +9,13 @@ Usage Instructions:
 
     Basic usage:
         python 3_entropy_burstiness.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                       -l1 "2021" -l2 "2025"
+                                       -l1 "2021" -l2 "2025" \
                                        -n 1000000
 
     Example with custom output directory:
         python 3_entropy_burstiness.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                       -l1 "2021" -l2 "2025"
-                                       -o output/
+                                       -l1 "2021" -l2 "2025" \
+                                       -o output/ \
                                        -n 1000000
 """
 
@@ -187,7 +187,15 @@ def main():
 
     max_val = max(max(vals1), max(vals2))
     ax1.set_ylim(0, max_val * 1.3)
-    ax1.legend(loc="upper right", framealpha=0.9, edgecolor="black")
+
+    # Legend placed horizontally above the graph
+    ax1.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.05),
+        ncol=2,
+        framealpha=0.9,
+        edgecolor="black",
+    )
 
     for i, v in enumerate(vals1):
         ax1.text(
@@ -253,7 +261,15 @@ def main():
 
     ax2.spines["top"].set_visible(False)
     ax2.spines["right"].set_visible(False)
-    ax2.legend(loc="upper right", framealpha=0.9, edgecolor="black")
+
+    # Legend placed horizontally above the graph
+    ax2.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.05),
+        ncol=2,
+        framealpha=0.9,
+        edgecolor="black",
+    )
 
     plt.tight_layout()
     plt.savefig(out_burst, dpi=300, bbox_inches="tight")

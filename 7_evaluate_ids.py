@@ -10,15 +10,15 @@ Usage Instructions:
     Basic usage:
         python 7_evaluate_ids.py -b path/to/baseline/ids_timeseries_1sec.csv \
                                  -t path/to/test/ids_timeseries_1sec.csv \
-                                 --baseline-label "2021 Baseline" \
-                                 --test-label "2025 Bot Traffic"
+                                 --baseline-label "2021" \
+                                 --test-label "2025"
 
     Example with custom output directory:
         python 7_evaluate_ids.py -b path/to/baseline/ids_timeseries_1sec.csv \
                                  -t path/to/test/ids_timeseries_1sec.csv \
                                  -o output/ \
-                                 --baseline-label "2021 Baseline" \
-                                 --test-label "2025 Bot Traffic"
+                                 --baseline-label "2021" \
+                                 --test-label "2025"
 """
 
 import argparse
@@ -128,7 +128,15 @@ def main():
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    ax.legend(loc="upper right", framealpha=0.9, edgecolor="black")
+    # MOVED LEGEND: Placed outside the plot area (above it) in a horizontal row
+    # so it mathematically can never overlap with the data distributions.
+    ax.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.05),
+        ncol=3,
+        framealpha=0.9,
+        edgecolor="black",
+    )
 
     plt.tight_layout()
     out_png = f"{args.outdir}/ids_degradation.png"

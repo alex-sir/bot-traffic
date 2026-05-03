@@ -287,7 +287,13 @@ def main():
                 color="black",
             )
 
-    ax.legend(loc="lower right", framealpha=0.9, edgecolor="black")
+    ax.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1),
+        ncol=2,
+        framealpha=0.9,
+        edgecolor="black",
+    )
 
     plt.tight_layout()
     plt.savefig(out_file, dpi=300, bbox_inches="tight")
