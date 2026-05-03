@@ -1,23 +1,27 @@
 """
-Script 5: Port-over-Time Heatmap Matrix
+Script 5: Delta Heatmap (ICS Port-over-Time)
 
-This script creates a high-resolution, explicitly defined matrix heatmap
-showing packet activity on key ICS/OT ports across 1-hour time bins.
-It uses rigid gridlines to separate the data into a true table-like
-matrix, with cells displaying the exact packet count if activity occurred.
+Generates a "Difference Matrix" comparing two datasets exclusively for ICS ports.
+It aligns both captures to relative time (Minute 0, Minute 1, etc.),
+subtracts the traffic volume of Dataset 1 from Dataset 2, and plots the delta.
+Red cells indicate a surge in traffic in Dataset 2; Blue cells indicate a drop.
 
 Usage Instructions:
-    Run the script from the terminal, providing the path to your PCAP file.
+    Run the script from the terminal, providing paths to both sets of PCAP files.
 
     Basic usage:
-        python 5_heatmap_port_time.py -p <path_to_pcap_file> -n 1000000
+        python 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
+                                      -l1 "2021" -l2 "2025" \
+                                      -n 1000000
 
     Example with custom output directory:
-        python 5_heatmap_port_time.py -p data/traffic.pcap -o output/ -n 71500000
+        python 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
+                                      -l1 "2021" -l2 "2025" \
+                                      -o output/ \
+                                      -n 1000000
 """
 
 import argparse
-import datetime
 import os
 import gzip
 import dpkt
@@ -43,30 +47,42 @@ plt.rcParams.update(
     }
 )
 
-# --- 1 hour bins to support multi-day aggregation ---
-BIN_SECS = 3600
+BIN_SECS = 60
 
-PORTS_OF_INTEREST = {
-    22: "SSH",
-    23: "Telnet",
-    80: "HTTP",
-    443: "HTTPS",
-    445: "SMB",
-    3389: "RDP",
+ICS_PORTS = {
     502: "Modbus",
-    102: "S7/ISO-TSAP",
-    2404: "IEC 104",
     20000: "DNP3",
     44818: "EtherNet/IP",
+    2222: "EtherNet/IP (alt)",
+    102: "S7/ISO-TSAP",
     4840: "OPC UA",
+    1089: "FF Fieldbus HSE",
+    1090: "FF Fieldbus HSE",
+    1091: "FF Fieldbus HSE",
+    2404: "IEC 104",
+    20547: "ProConOS",
+    1962: "PCWorx",
+    789: "Red Lion",
+    9600: "OMRON FINS",
     47808: "BACnet",
+    161: "SNMP (mgmt)",
+    162: "SNMP trap",
 }
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Port-over-Time Heatmap")
+    parser = argparse.ArgumentParser(description="Cross-Year Delta Heatmap")
     parser.add_argument(
-        "-p", "--pcap", nargs="+", required=True, help="Paths to input PCAPs"
+        "-p1", "--pcap1", nargs="+", required=True, help="Dataset 1 PCAPs"
+    )
+    parser.add_argument(
+        "-p2", "--pcap2", nargs="+", required=True, help="Dataset 2 PCAPs"
+    )
+    parser.add_argument(
+        "-l1", "--label1", default="Dataset 1", help="Label for Dataset 1"
+    )
+    parser.add_argument(
+        "-l2", "--label2", default="Dataset 2", help="Label for Dataset 2"
     )
     parser.add_argument("-o", "--outdir", default="output", help="Output directory")
     parser.add_argument(
@@ -100,19 +116,15 @@ def get_ipv4_packet(buf, datalink):
     return None
 
 
-def main():
-    args = parse_args()
-    os.makedirs(args.outdir, exist_ok=True)
-    out_png = os.path.join(args.outdir, "port_heatmap_matrix.png")
-    out_csv = os.path.join(args.outdir, "port_heatmap_data.csv")
-
+def extract_heatmap_data(pcap_list, max_packets):
+    """
+    Extracts time-binned port activity, normalizing the timeline
+    so the first packet establishes Relative Time = 0.
+    """
     t0 = None
     port_bins = defaultdict(lambda: defaultdict(int))
+    sorted_pcaps = sorted(pcap_list)
 
-    # Sort files by name to guarantee chronological processing for t0 discovery
-    sorted_pcaps = sorted(args.pcap)
-
-    # --- PHASE 1: Data Extraction & Bucketing ---
     for pcap_file in sorted_pcaps:
         print(f"[*] Parsing {os.path.basename(pcap_file)}...")
         packets_this_file = 0
@@ -121,14 +133,14 @@ def main():
             pcap = dpkt.pcap.Reader(f)
             datalink = pcap.datalink()
             for ts, buf in pcap:
-                if packets_this_file >= args.max_packets:
+                if packets_this_file >= max_packets:
                     break
-                packets_this_file += 1
 
-                # Baseline offset is set to the very first packet of the first chronologically ordered file
+                # Establish the baseline time for this specific dataset
                 if t0 is None:
                     t0 = ts
 
+                packets_this_file += 1
                 ip = get_ipv4_packet(buf, datalink)
                 if not ip:
                     continue
@@ -140,36 +152,62 @@ def main():
                     except:
                         pass
 
-                if port and port in PORTS_OF_INTEREST:
+                # Filter specifically for ICS ports
+                if port and port in ICS_PORTS:
+                    # Calculate the relative time bin (e.g., Minute 0, Minute 1)
                     bin_id = int((ts - t0) / BIN_SECS)
                     port_bins[port][bin_id] += 1
 
-    if t0 is None:
-        print("[-] No packets found to analyze.")
-        return
-
-    # --- PHASE 2: Matrix Construction ---
     max_bin = max((b for d in port_bins.values() for b in d.keys()), default=0)
-    all_bins = list(range(max_bin + 1))
-    port_keys = list(PORTS_OF_INTEREST.keys())
-    port_labels = [f"{PORTS_OF_INTEREST[p]} ({p})" for p in port_keys]
+    return port_bins, max_bin
 
-    matrix = np.array(
-        [[port_bins[p].get(b, 0) for b in all_bins] for p in port_keys], dtype=float
+
+def main():
+    args = parse_args()
+    os.makedirs(args.outdir, exist_ok=True)
+    out_png = os.path.join(args.outdir, "ics_heatmap_delta.png")
+    out_csv = os.path.join(args.outdir, "ics_heatmap_delta.csv")
+
+    print(f"--- Extracting {args.label1} ---")
+    bins1, max_bin1 = extract_heatmap_data(args.pcap1, args.max_packets)
+
+    print(f"--- Extracting {args.label2} ---")
+    bins2, max_bin2 = extract_heatmap_data(args.pcap2, args.max_packets)
+
+    # --- PHASE 2: Matrix Alignment & Delta Calculation ---
+    # Ensure both matrices have the same number of columns so they can be subtracted
+    global_max_bin = max(max_bin1, max_bin2)
+    all_bins = list(range(global_max_bin + 1))
+
+    port_keys = list(ICS_PORTS.keys())
+    port_labels = [f"{ICS_PORTS[p]} ({p})" for p in port_keys]
+
+    matrix1 = np.array(
+        [[bins1[p].get(b, 0) for b in all_bins] for p in port_keys], dtype=float
     )
-    matrix_log = np.log1p(matrix)
+    matrix2 = np.array(
+        [[bins2[p].get(b, 0) for b in all_bins] for p in port_keys], dtype=float
+    )
+
+    # Calculate the Difference (Newer Dataset - Older Dataset)
+    delta_matrix = matrix2 - matrix1
 
     # --- PHASE 3: Visualization ---
-    # Width calculation is capped to prevent massive multi-day matrices from breaking matplotlib
-    fig_width = min(max(18, len(all_bins) * 0.8), 60)
+    fig_width = min(max(18, len(all_bins) * 1.2), 60)
     fig_height = max(12, len(port_keys) * 0.9)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
+    # Calculate the maximum absolute value to center the diverging colormap strictly at 0
+    abs_max = max(abs(delta_matrix.max()), abs(delta_matrix.min()))
+    if abs_max == 0:
+        abs_max = 1  # Prevent division by zero if datasets are identical
+
+    # RdBu_r provides a classic "Heat/Cold" visual. Red = Growth, Blue = Decline.
     im = ax.imshow(
-        matrix_log,
+        delta_matrix,
         aspect="auto",
-        cmap="YlOrRd",
-        norm=mcolors.Normalize(vmin=0, vmax=matrix_log.max()),
+        cmap="RdBu_r",
+        norm=mcolors.TwoSlopeNorm(vmin=-abs_max, vcenter=0, vmax=abs_max),
     )
 
     ax.set_xticks(np.arange(-0.5, len(all_bins), 1), minor=True)
@@ -181,63 +219,65 @@ def main():
     ax.set_yticklabels(port_labels)
     ax.set_ylabel("Targeted Protocol / Port", labelpad=20, fontweight="bold")
 
-    time_labels = [
-        datetime.datetime.fromtimestamp(
-            t0 + b * BIN_SECS, tz=datetime.timezone.utc
-        ).strftime("%m-%d %H:00")
-        for b in all_bins
-    ]
-
-    # Tick Label Optimizer: If there are too many columns, only show tick labels every N hours to prevent overlapping
+    # Time labels are now relative to the start of the capture (e.g., T+0, T+1)
+    time_labels = [f"T+{b}" for b in all_bins]
     tick_spacing = max(1, len(all_bins) // 30)
+
     ax.set_xticks(range(0, len(all_bins), tick_spacing))
     ax.set_xticklabels(
-        [time_labels[i] for i in range(0, len(all_bins), tick_spacing)],
-        rotation=45,
-        ha="right",
+        [time_labels[i] for i in range(0, len(all_bins), tick_spacing)], rotation=0
     )
-    ax.set_xlabel("Time Bins (UTC, 1-Hour Intervals)", labelpad=20, fontweight="bold")
+    ax.set_xlabel(
+        f"Relative Time Bins ({BIN_SECS}-Second Intervals)",
+        labelpad=20,
+        fontweight="bold",
+    )
 
-    # Text Overlay Guard: Only draw physical numbers inside the cells if the matrix isn't incredibly wide
+    # --- Text Overlay Logic ---
     if len(all_bins) <= 48:
         for i in range(len(port_keys)):
             for j in range(len(all_bins)):
-                val = int(matrix[i, j])
-                if val > 0:
-                    text_color = (
-                        "white"
-                        if matrix_log[i, j] > (matrix_log.max() * 0.6)
-                        else "black"
-                    )
+                val = int(delta_matrix[i, j])
+                if val != 0:
+                    # Format text to explicitly show the direction of the delta (+ or -)
+                    text_str = f"+{val:,}" if val > 0 else f"{val:,}"
+
+                    # Ensure text is readable against both dark red and dark blue backgrounds
+                    intensity = abs(val) / abs_max
+                    text_color = "white" if intensity > 0.5 else "black"
+
                     ax.text(
                         j,
                         i,
-                        str(val),
+                        text_str,
                         ha="center",
                         va="center",
                         color=text_color,
-                        fontsize=22,  # Updated to match standardized fonts
+                        fontsize=20,
                         fontweight="bold",
                     )
 
     cbar = plt.colorbar(im, ax=ax, fraction=0.025, pad=0.02)
     cbar.set_label(
-        "Log(Packet Count + 1)",
+        f"Δ Packet Count ({args.label2} - {args.label1})",
         rotation=270,
-        labelpad=30,
+        labelpad=35,
         fontweight="bold",
-        fontsize=26,  # Matched to axes.labelsize
+        fontsize=26,
     )
-    cbar.ax.tick_params(labelsize=22)  # Matched to xtick/ytick labelsize
+    cbar.ax.tick_params(labelsize=22)
 
     plt.tight_layout()
     plt.savefig(out_png, dpi=300, bbox_inches="tight")
 
+    # Save the raw delta calculations to a CSV
     df = pd.DataFrame(
-        matrix.astype(int), index=port_labels, columns=[f"bin_{b}" for b in all_bins]
+        delta_matrix.astype(int),
+        index=port_labels,
+        columns=[f"bin_{b}" for b in all_bins],
     )
     df.to_csv(out_csv)
-    print(f"[+] Heatmap raw data saved to {out_csv}")
+    print(f"[+] Delta Heatmap saved to {out_png}")
 
 
 if __name__ == "__main__":

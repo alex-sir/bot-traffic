@@ -1,7 +1,7 @@
 """
-Script 7: Cross-Year IDS Anomaly Simulation
+Script 7: IDS Anomaly Simulation
 
-This script compares a test traffic timeline against a strict IDS baseline
+Compares a test traffic timeline against a strict IDS baseline
 established by historical traffic, proving the degradation of standard thresholding.
 
 Usage Instructions:

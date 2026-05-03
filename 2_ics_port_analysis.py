@@ -1,19 +1,24 @@
 """
-Script 2: ICS/OT Port Targeting Analysis
+Script 2: ICS Port Targeting Analysis
 
-This script reads a PCAP file iteratively, identifies traffic targeting known
-Industrial Control System (ICS) ports, and determines the scanning
-pattern (Sequential vs. Random) based on destination IP gaps.
-It outputs a high-resolution horizontal bar chart.
+Generates a grouped horizontal bar chart comparing the volume and pattern
+of ICS port targeting between two distinct datasets on the same axes.
+Features a dynamically scaling threshold for calculating sequential vs.
+random scanning patterns.
 
 Usage Instructions:
-    Run the script from the terminal, providing the path to your PCAP file.
+    Run the script from the terminal, providing the paths to your PCAP files.
 
     Basic usage:
-        python 2_ics_port_analysis.py -p <path_to_pcap_file> -n 1000000
+        python 2_ics_port_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                      -l1 "2021" -l2 "2025" \
+                                      -n 1000000
 
     Example with custom output directory:
-        python 2_ics_port_analysis.py -p data/traffic-2025-01-20.00-1M.pcap -o output/ -n 71500000
+        python 2_ics_port_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                      -l1 "2021 Baseline" -l2 "2025 Bot Traffic" \
+                                      -o output/ \
+                                      -n 1000000
 """
 
 import argparse
@@ -22,6 +27,7 @@ import os
 import gzip
 import dpkt
 from collections import Counter, defaultdict
+import numpy as np
 import matplotlib
 
 matplotlib.use("Agg")
@@ -50,21 +56,30 @@ ICS_PORTS = {
     1089: "FF Fieldbus HSE",
     1090: "FF Fieldbus HSE",
     1091: "FF Fieldbus HSE",
-    2404: "IEC 60870-5-104",
+    2404: "IEC 104",
     20547: "ProConOS",
     1962: "PCWorx",
     789: "Red Lion",
     9600: "OMRON FINS",
     47808: "BACnet",
-    161: "SNMP (ICS mgmt)",
+    161: "SNMP (mgmt)",
     162: "SNMP trap",
 }
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="ICS Port Targeting Analysis")
+    parser = argparse.ArgumentParser(description="Cross-Year ICS Port Analysis")
     parser.add_argument(
-        "-p", "--pcap", nargs="+", required=True, help="Paths to input PCAPs"
+        "-p1", "--pcap1", nargs="+", required=True, help="Paths to Dataset 1 PCAPs"
+    )
+    parser.add_argument(
+        "-p2", "--pcap2", nargs="+", required=True, help="Paths to Dataset 2 PCAPs"
+    )
+    parser.add_argument(
+        "-l1", "--label1", default="Dataset 1", help="Label for Dataset 1"
+    )
+    parser.add_argument(
+        "-l2", "--label2", default="Dataset 2", help="Label for Dataset 2"
     )
     parser.add_argument("-o", "--outdir", default="output", help="Output directory")
     parser.add_argument(
@@ -98,89 +113,185 @@ def get_ipv4_packet(buf, datalink):
     return None
 
 
+def extract_ics_data(pcap_list, max_packets):
+    """
+    Parses the provided PCAPs, counts packets targeting ICS ports,
+    and analyzes the IP targeting gaps to determine the scan pattern
+    using a dynamically scaling threshold.
+    """
+    ics_hits = Counter()
+    dst_ips_per_port = defaultdict(list)
+    total_packets_parsed = 0
+
+    for pcap_file in pcap_list:
+        packets_this_file = 0
+        try:
+            with open_pcap(pcap_file) as f:
+                pcap = dpkt.pcap.Reader(f)
+                datalink = pcap.datalink()
+                for ts, buf in pcap:
+                    if packets_this_file >= max_packets:
+                        break
+
+                    packets_this_file += 1
+                    total_packets_parsed += 1
+
+                    ip = get_ipv4_packet(buf, datalink)
+                    if not ip:
+                        continue
+
+                    port = None
+                    if ip.p in (6, 17):
+                        try:
+                            port = ip.data.dport
+                        except:
+                            pass
+
+                    # Log the hit and the targeted IP address if it matches an ICS port
+                    if port and port in ICS_PORTS:
+                        proto = ICS_PORTS[port]
+                        ics_hits[proto] += 1
+                        dst_ips_per_port[proto].append(ip.dst)
+        except Exception as e:
+            print(f"[-] Error parsing {pcap_file}: {e}")
+
+    # --- DYNAMIC THRESHOLD CALCULATION ---
+    # We scale the threshold based on the total volume of traffic analyzed.
+    # A massive capture window increases the likelihood of dropped packets or
+    # interleaved noise, mathematically widening the observed gap of an
+    # otherwise sequential scan.
+    # Rule: Base threshold of 5, scaling +1 for every 50,000 packets analyzed.
+    dynamic_threshold = max(5, total_packets_parsed / 50000)
+
+    # Calculate Scanning Patterns (Sequential vs. Random)
+    patterns = {}
+    for proto, ips in dst_ips_per_port.items():
+        if len(ips) < 5:
+            patterns[proto] = ""
+            continue
+        try:
+            # Convert binary IP addresses to integers to find mathematical gaps
+            int_ips = sorted(set(struct.unpack("!I", ip_bytes)[0] for ip_bytes in ips))
+
+            # Calculate the numeric distance between each sequentially targeted IP
+            diffs = [int_ips[i + 1] - int_ips[i] for i in range(len(int_ips) - 1)]
+            avg_gap = sum(diffs) / len(diffs) if diffs else 0
+
+            # Compare against the dynamically generated threshold
+            pat_type = "Seq" if avg_gap <= dynamic_threshold else "Rnd"
+
+            # Format the output string to strictly show the pattern and calculated gap
+            patterns[proto] = f"{pat_type} (Gap: {avg_gap:.1f})"
+        except Exception:
+            patterns[proto] = ""
+
+    return ics_hits, patterns
+
+
 def main():
     args = parse_args()
     os.makedirs(args.outdir, exist_ok=True)
-    out_file = os.path.join(args.outdir, "ics_port_analysis.png")
+    out_file = os.path.join(args.outdir, "ics_ports.png")
 
-    ics_hits = Counter()
-    dst_ips_per_port = defaultdict(list)
+    print(f"--- Extracting {args.label1} ---")
+    hits1, pat1 = extract_ics_data(args.pcap1, args.max_packets)
+    print(f"--- Extracting {args.label2} ---")
+    hits2, pat2 = extract_ics_data(args.pcap2, args.max_packets)
 
-    # --- PHASE 1: Data Extraction ---
-    for pcap_file in args.pcap:
-        print(f"[*] Parsing {os.path.basename(pcap_file)}...")
-        packets_this_file = 0
-
-        with open_pcap(pcap_file) as f:
-            pcap = dpkt.pcap.Reader(f)
-            datalink = pcap.datalink()
-            for ts, buf in pcap:
-                if packets_this_file >= args.max_packets:
-                    break
-                packets_this_file += 1
-
-                ip = get_ipv4_packet(buf, datalink)
-                if not ip:
-                    continue
-
-                port = None
-                if ip.p in (6, 17):
-                    try:
-                        port = ip.data.dport
-                    except:
-                        pass
-
-                if port and port in ICS_PORTS:
-                    proto = ICS_PORTS[port]
-                    ics_hits[proto] += 1
-                    dst_ips_per_port[proto].append(ip.dst)
-
-    if not ics_hits:
-        print("[-] No ICS port traffic found in the provided PCAPs.")
+    # Get a master list of all targeted protocols across both datasets
+    all_protos = set(hits1.keys()).union(set(hits2.keys()))
+    if not all_protos:
+        print("[-] No ICS traffic found in either dataset.")
         return
 
-    # --- PHASE 2: Pattern Calculation ---
-    pattern_labels = {}
-    for proto, ips in dst_ips_per_port.items():
-        if len(ips) < 5:
-            pattern_labels[proto] = "Insufficient Data"
-            continue
-        try:
-            int_ips = sorted(set(struct.unpack("!I", ip_bytes)[0] for ip_bytes in ips))
-            diffs = [int_ips[i + 1] - int_ips[i] for i in range(len(int_ips) - 1)]
-            avg_gap = sum(diffs) / len(diffs) if diffs else 0
-            pat_type = "Seq" if avg_gap <= 5 else "Rnd"
-            pattern_labels[proto] = f"{pat_type} (Gap: {avg_gap:.1f})"
-        except Exception:
-            pattern_labels[proto] = "Error"
+    # Sort protocols based on combined volume to make the graph readable (descending order)
+    sorted_protos = sorted(
+        list(all_protos), key=lambda x: hits1[x] + hits2[x], reverse=True
+    )
 
-    # --- PHASE 3: Visualization ---
-    fig, ax = plt.subplots(figsize=(16, 9))
-    sorted_hits = ics_hits.most_common()[::-1]
-    protos, counts = zip(*sorted_hits)
+    # We invert the list so the largest bars render at the top of the horizontal chart
+    sorted_protos = sorted_protos[::-1]
 
-    bars = ax.barh(protos, counts, color="#8B0000", edgecolor="black", alpha=0.85)
+    counts1 = [hits1[p] for p in sorted_protos]
+    counts2 = [hits2[p] for p in sorted_protos]
+    patterns1 = [pat1.get(p, "") for p in sorted_protos]
+    patterns2 = [pat2.get(p, "") for p in sorted_protos]
+
+    # --- Visualization ---
+    fig, ax = plt.subplots(figsize=(18, 16))
+    group_spacing = 3.0
+    y = np.arange(len(sorted_protos)) * group_spacing
+
+    # Separation variables: Bars thickened (0.90), wide offset prevents text overlap
+    bar_thickness = 0.90
+    offset = 0.65  # Pushes the bars further apart from the center of their group
+
+    # Grouped bars - Explicit offset used to create visual spacing between the datasets
+    bars1 = ax.barh(
+        y + offset,
+        counts1,
+        bar_thickness,
+        label=args.label1,
+        color="#4C72B0",
+        edgecolor="black",
+    )
+    bars2 = ax.barh(
+        y - offset,
+        counts2,
+        bar_thickness,
+        label=args.label2,
+        color="#C44E52",
+        edgecolor="black",
+    )
+
+    # Applied specific Y-axis label to clarify the listed string names
+    ax.set_ylabel("ICS Protocols / Ports", labelpad=20, fontweight="bold")
     ax.set_xlabel("Packet Count", labelpad=15, fontweight="bold")
+    ax.set_yticks(y)
+    ax.set_yticklabels(sorted_protos)
     ax.grid(axis="x", linestyle="--", alpha=0.5)
-    ax.set_xlim(0, max(counts) * 1.8)
 
-    for bar, proto, count in zip(bars, protos, counts):
+    max_val = max(max(counts1), max(counts2))
+
+    # Extended X-limit (1.4x) restored so the outside text has plenty of breathing room
+    ax.set_xlim(0, max_val * 1.4)
+
+    # Remove top/right spines for a cleaner academic aesthetic
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    # Annotate bars with the pattern text firmly outside to the right
+    for i, bar in enumerate(bars1):
         width = bar.get_width()
-        pattern_text = pattern_labels.get(proto, "N/A")
-        annotation = f"  {count:,} pkts | {pattern_text}"
-        ax.text(
-            width,
-            bar.get_y() + bar.get_height() / 2,
-            annotation,
-            va="center",
-            ha="left",
-            fontsize=22,  # Updated to match standardized fonts
-            color="black",
-        )
+        if width > 0 and patterns1[i]:
+            ax.text(
+                width + (max_val * 0.015),
+                bar.get_y() + bar.get_height() / 2,
+                patterns1[i],
+                va="center",
+                ha="left",
+                fontsize=20,
+                color="black",
+            )
+
+    for i, bar in enumerate(bars2):
+        width = bar.get_width()
+        if width > 0 and patterns2[i]:
+            ax.text(
+                width + (max_val * 0.015),
+                bar.get_y() + bar.get_height() / 2,
+                patterns2[i],
+                va="center",
+                ha="left",
+                fontsize=20,
+                color="black",
+            )
+
+    ax.legend(loc="lower right", framealpha=0.9, edgecolor="black")
 
     plt.tight_layout()
     plt.savefig(out_file, dpi=300, bbox_inches="tight")
-    print(f"[+] ICS analysis chart saved to {out_file}")
+    print(f"[+] Combined ICS analysis chart saved to {out_file}")
 
 
 if __name__ == "__main__":

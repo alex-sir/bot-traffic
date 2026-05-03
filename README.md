@@ -140,70 +140,71 @@ mkdir output
 
 ## Scripts
 
-The project consists of five Python scripts which automate data engineering and
-statistical analysis of the network telescope data.
-Additionally, the bash script `run_analysis.sh` is provided to automate the
-execution of all five Python scripts.
+The project consists of seven Python scripts which automate data engineering and
+statistical analysis of the network telescope data. Because the pipeline is
+designed to perform longitudinal (cross-year) comparisons, all of the scripts
+require providing two distinct datasets simultaneously to generate comparative
+visualizations and tables.
 
 ### Script 1 — `1_pcap_overview.py`
 
 **Topic: Data Engineering**
-Reads the PCAP file iteratively and produces a single, high-quality table summarizing core metrics of the network traffic, including data volume, average packet rates, and protocol distribution.
-**Outputs:** `pcap_overview_table.png`
+Reads two distinct sets of PCAP files iteratively and produces a single, high-quality, combined comparison table summarizing core metrics of the network traffic, including data volume, average packet rates, and the dominant ICS protocol.
+**Outputs:** `pcap_overview.png`
 
 ```bash
-python 1_pcap_overview.py -p <pcap_file> -o <output_dir> -n <max_packets>
+python 1_pcap_overview.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 2 — `2_ics_port_analysis.py`
 
 **Topic: Data Engineering**
-Identifies traffic targeting known Industrial Control System (ICS) ports and determines the scanning pattern (Sequential vs. Random) based on destination IP gaps. Produces an annotated horizontal bar chart.
-**Outputs:** `ics_port_analysis.png`
+Identifies traffic targeting known Industrial Control System (ICS) ports and determines the scanning pattern (Sequential vs. Random) based on destination IP gaps using a dynamically scaling threshold. Produces an overlaid grouped horizontal bar chart.
+**Outputs:** `ics_ports.png`
 
 ```bash
-python 2_ics_port_analysis.py -p <pcap_file> -o <output_dir> -n <max_packets>
+python 2_ics_port_analysis.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 3 — `3_entropy_burstiness.py`
 
 **Topic: Statistical Analysis**
-Calculates mathematically reliable metrics for network telescope traffic. Computes global Shannon Entropy for Source IPs/Destination Ports and Inter-Arrival Time (IAT) to determine traffic burstiness.
-**Outputs:** `entropy_diversity.png`, `burstiness_iat.png`
+Calculates statistical metrics across both datasets. Outputs a grouped bar chart for global Shannon Entropy (Source IPs/Destination Ports) and an overlaid Inter-Arrival Time (IAT) histogram to visually contrast traffic burstiness.
+**Outputs:** `entropy.png`, `burstiness.png`
 
 ```bash
-python 3_entropy_burstiness.py -p <pcap_file> -o <output_dir> -n <max_packets>
+python 3_entropy_burstiness.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 4 — `4_geo_analysis.py`
 
 **Topic: Statistical Analysis**
-Maps source IPs to countries using a [MaxMind DB file](https://maxmind.github.io/MaxMind-DB). Produces a high-resolution horizontal bar chart annotated with total packet counts and unique IPs per country.
-**Outputs:** `geo_country_bar.png`
+Maps source IPs to countries using MaxMind DB files for their respective years. Produces a dense analytical table comparing the top source countries across both datasets, explicitly calculating the percent shift (Δ) in volume.
+**Outputs:** `geo_analysis.png`
 
 ```bash
-python 4_geo_analysis.py -p <pcap_file> -m <mmdb_file> -o <output_dir> -n <max_packets>
+python 4_geo_analysis.py -p1 <pcap_dir1> -p2 <pcap_dir2> -m1 <mmdb_file1> -m2 <mmdb_file2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 5 — `5_heatmap_port_time.py`
 
 **Topic: Statistical Analysis**
-Builds an explicitly defined, high-resolution matrix heatmap showing packet activity on key ICS/OT ports across 1-minute time bins.
-**Outputs:** `port_heatmap_matrix.png`, `port_heatmap_data.csv`
+Builds an explicitly defined, high-resolution Delta "Difference Matrix" heatmap. It aligns both captures to relative time, subtracts the traffic volume of the baseline from the newer dataset, and highlights surges or drops in activity specifically on ICS ports.
+**Outputs:** `ics_heatmap_delta.png`, `ics_heatmap_delta.csv`
 
 ```bash
-python 5_heatmap_port_time.py -p <pcap_file> -o <output_dir> -n <max_packets>
+python 5_heatmap_port_time.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 6 — `6_ids_timeseries.py`
 
 **Topic: Anomaly-Based IDS Simulation**
-Extracts the raw packet volume per 1-second interval across all provided PCAP files.
-This generates the foundational data needed to simulate an anomaly-based IDS.
-**Outputs:** `ids_timeseries_1sec.csv`
+Extracts the raw packet volume per 1-second interval across two distinct sets of PCAP files.
+This generates the foundational CSV data needed for both datasets to simulate an anomaly-based IDS in Script 7.
+**Outputs:** `<label1>_ids_timeseries_1sec.csv`, `<label2>_ids_timeseries_1sec.csv`
 
 ```bash
-python 6_ids_timeseries.py -p <pcap_file> -o <output_dir> -n <max_packets>
+python 6_ids_timeseries.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 7 — `7_evaluate_ids.py`
@@ -221,46 +222,46 @@ python 7_evaluate_ids.py -b <baseline_csv> -t <test_csv> -o <output_dir> --basel
 
 **NOTE: This script must be run within a Merit VM.**
 
-Iterates through the specified days of data of the specified month.
-It runs all five Python scripts on the specified PCAP hours, saving the
-output into organized folders.
+Iterates through the specified days of data of the specified month for two different years.
+It runs Python scripts 1-6 on the specified PCAP hours, feeding both datasets simultaneously to generate comparative outputs.
 
 ```bash
-./run_analysis.sh <YYYY> <MM> <START_DAY> <END_DAY> "<HOURS>" [MAX_PACKETS]
+./run_analysis.sh <YEAR1> <YEAR2> <MM> <START_DAY> <END_DAY> "<HOURS>" [MAX_PACKETS]
 ```
 
 ---
 
 ## Output Files Summary
 
-| File                      | Produced by | Description                                      |
-| ------------------------- | ----------- | ------------------------------------------------ |
-| `pcap_overview_table.png` | Script 1    | Core metrics and statistics summary table        |
-| `ics_port_analysis.png`   | Script 2    | ICS port targeting and scanning pattern chart    |
-| `entropy_diversity.png`   | Script 3    | Global Shannon entropy chart (Actual vs Maximum) |
-| `burstiness_iat.png`      | Script 3    | Inter-Arrival Time (IAT) distribution histogram  |
-| `geo_country_bar.png`     | Script 4    | Top source countries bar chart with IP counts    |
-| `port_heatmap_matrix.png` | Script 5    | Annotated ICS port activity matrix               |
-| `port_heatmap_data.csv`   | Script 5    | Raw CSV data for the heatmap matrix              |
-| `ids_timeseries_1sec.csv` | Script 6    | Raw CSV data for the IDS simulation analysis     |
-| `ids_degradation.png`     | Script 7    | IDS simulation results chart                     |
+| File                              | Produced by | Description                                                   |
+| --------------------------------- | ----------- | ------------------------------------------------------------- |
+| `pcap_overview.png`               | Script 1    | Cross-Year core metrics and statistics summary table          |
+| `ics_ports.png`                   | Script 2    | Grouped cross-year ICS port targeting and scanning chart      |
+| `entropy.png`                     | Script 3    | Grouped cross-year Shannon entropy bar chart                  |
+| `burstiness.png`                  | Script 3    | Overlaid cross-year Inter-Arrival Time (IAT) histogram        |
+| `geo_analysis.png`                | Script 4    | Cross-Year geographic shift table tracking volume delta       |
+| `ics_heatmap_delta.png`           | Script 5    | Delta "Difference Matrix" heatmap for ICS port activity       |
+| `ics_heatmap_delta.csv`           | Script 5    | Raw CSV data backing the delta heatmap matrix                 |
+| `<label>_ids_timeseries_1sec.csv` | Script 6    | Raw CSV time-series data for both datasets for IDS simulation |
+| `ids_degradation.png`             | Script 7    | Cross-Year IDS anomaly simulation results and threshold chart |
 
 ---
 
 ## Recommended Run Order
 
-1. Script 1 (orientation, sanity check)
-2. Script 2 (ICS targeting findings)
-3. Script 3 (entropy/burstiness metrics)
-4. Script 4 (geo analysis)
-5. Script 5 (heatmap visualization)
+1. Script 1 (orientation, data volume)
+2. Script 2 (ICS targeting and gap findings)
+3. Script 3 (entropy and burstiness distribution metrics)
+4. Script 4 (geo analysis table and delta shift)
+5. Script 5 (delta heatmap visualization)
 6. Script 6 (IDS time-series data)
 7. Script 7 (IDS simulation results)
 
-The bash script `run_analysis.sh` runs Python scripts 1-6 in
-this order. **Script 7 must be run manually from the terminal**.
-It is recommended to run script 7 after `run_analysis.sh`
-finishes generating all of its output.
+The bash script `run_analysis.sh` runs Python scripts 1-6 simultaneously on both datasets in
+this order. Script 7 must be run manually from the terminal, passing the two CSV files
+generated by script 6.
+
+**It is recommended to run script 7 after `run_analysis.sh` finishes generating all of its output.**
 
 ## Contributors
 

@@ -1,20 +1,22 @@
 """
-Script 3: Global Entropy & Inter-Arrival Time (Burstiness) Analysis
+Script 3: Global Entropy & Burstiness
 
-This script calculates mathematically reliable metrics for network telescope traffic:
-1. Global Shannon Entropy for Source IPs and Destination Ports.
-2. Inter-Arrival Time (IAT) between packets to determine traffic burstiness.
-
-It outputs TWO separate, high-resolution, graphs.
+Calculates mathematical diversity (Entropy) and Inter-Arrival Times (Burstiness)
+for two distinct datasets, rendering the results on shared, comparative graphs.
 
 Usage Instructions:
-    Run the script from the terminal, providing the path to your PCAP file.
+    Run the script from the terminal, providing the paths to your PCAP files.
 
     Basic usage:
-        python 3_entropy_burstiness.py -p <path_to_pcap_file> -n 1000000
+        python 3_entropy_burstiness.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                       -l1 "2021" -l2 "2025"
+                                       -n 1000000
 
     Example with custom output directory:
-        python 3_entropy_burstiness.py -p data/traffic.pcap -o output/ -n 71500000
+        python 3_entropy_burstiness.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                       -l1 "2021" -l2 "2025"
+                                       -o output/
+                                       -n 1000000
 """
 
 import argparse
@@ -44,9 +46,18 @@ plt.rcParams.update(
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Reliable Entropy & Burstiness")
+    parser = argparse.ArgumentParser(description="Cross-Year Entropy & Burstiness")
     parser.add_argument(
-        "-p", "--pcap", nargs="+", required=True, help="Paths to input PCAPs"
+        "-p1", "--pcap1", nargs="+", required=True, help="Paths to Dataset 1 PCAPs"
+    )
+    parser.add_argument(
+        "-p2", "--pcap2", nargs="+", required=True, help="Paths to Dataset 2 PCAPs"
+    )
+    parser.add_argument(
+        "-l1", "--label1", default="Dataset 1", help="Label for Dataset 1"
+    )
+    parser.add_argument(
+        "-l2", "--label2", default="Dataset 2", help="Label for Dataset 2"
     )
     parser.add_argument("-o", "--outdir", default="output", help="Output directory")
     parser.add_argument(
@@ -82,141 +93,156 @@ def get_ipv4_packet(buf, datalink):
 
 def calc_entropy(counter):
     total = sum(counter.values())
-    unique_count = len(counter)
-    if total == 0 or unique_count == 0:
-        return 0.0, 0.0
-    entropy = -sum(
-        (c / total) * math.log2(c / total) for c in counter.values() if c > 0
-    )
-    max_entropy = math.log2(unique_count)
-    return entropy, max_entropy
+    if total == 0:
+        return 0.0
+    return -sum((c / total) * math.log2(c / total) for c in counter.values() if c > 0)
+
+
+def extract_data(pcap_list, max_packets):
+    src_ips, dst_ports = Counter(), Counter()
+    all_iats = []
+
+    for pcap_file in pcap_list:
+        print(f"[*] Parsing {os.path.basename(pcap_file)}...")
+        packets_this_file = 0
+        file_timestamps = []
+
+        try:
+            with open_pcap(pcap_file) as f:
+                pcap = dpkt.pcap.Reader(f)
+                datalink = pcap.datalink()
+                for ts, buf in pcap:
+                    if packets_this_file >= max_packets:
+                        break
+                    packets_this_file += 1
+
+                    ip = get_ipv4_packet(buf, datalink)
+                    if ip:
+                        file_timestamps.append(ts)
+                        src_ips[ip.src] += 1
+                        if ip.p in (6, 17):
+                            try:
+                                dst_ports[ip.data.dport] += 1
+                            except:
+                                pass
+
+            file_timestamps.sort()
+            if len(file_timestamps) > 1:
+                all_iats.extend(np.diff(file_timestamps))
+        except Exception as e:
+            print(f"[-] Error parsing {pcap_file}: {e}")
+
+    iats = np.array(all_iats)
+    return calc_entropy(src_ips), calc_entropy(dst_ports), iats
 
 
 def main():
     args = parse_args()
     os.makedirs(args.outdir, exist_ok=True)
-    out_entropy = os.path.join(args.outdir, "entropy_diversity.png")
-    out_burst = os.path.join(args.outdir, "burstiness_iat.png")
+    out_entropy = os.path.join(args.outdir, "entropy.png")
+    out_burst = os.path.join(args.outdir, "burstiness.png")
 
-    src_ips, dst_ports = Counter(), Counter()
-    total_packets = 0
-    all_iats = []
+    print(f"--- Extracting {args.label1} ---")
+    ip_ent1, port_ent1, iats1 = extract_data(args.pcap1, args.max_packets)
 
-    # --- PHASE 1: Data Extraction & Safe IAT Segregation ---
-    for pcap_file in args.pcap:
-        print(f"[*] Parsing {os.path.basename(pcap_file)}...")
-        packets_this_file = 0
-        file_timestamps = []
+    print(f"--- Extracting {args.label2} ---")
+    ip_ent2, port_ent2, iats2 = extract_data(args.pcap2, args.max_packets)
 
-        with open_pcap(pcap_file) as f:
-            pcap = dpkt.pcap.Reader(f)
-            datalink = pcap.datalink()
-            for ts, buf in pcap:
-                if packets_this_file >= args.max_packets:
-                    break
-
-                packets_this_file += 1
-                total_packets += 1
-                ip = get_ipv4_packet(buf, datalink)
-                if ip:
-                    file_timestamps.append(ts)
-                    src_ips[ip.src] += 1
-                    if ip.p in (6, 17):
-                        try:
-                            dst_ports[ip.data.dport] += 1
-                        except:
-                            pass
-
-        # Calculate Burstiness strictly WITHIN the boundaries of this specific file
-        file_timestamps.sort()
-        if len(file_timestamps) > 1:
-            all_iats.extend(np.diff(file_timestamps))
-
-    if total_packets < 2 or not all_iats:
-        print("[-] Not enough packets to analyze burstiness.")
-        return
-
-    # --- PHASE 2: Calculation ---
-    iats = np.array(all_iats)
-    mean_iat, std_iat = np.mean(iats), np.std(iats)
-    cv_iat = std_iat / mean_iat if mean_iat > 0 else 0
-
-    ip_ent, ip_max = calc_entropy(src_ips)
-    port_ent, port_max = calc_entropy(dst_ports)
-
-    # --- PHASE 3: Visualization (Graph 1 - Entropy) ---
+    # --- GRAPH 1: Grouped Entropy Bar Chart ---
     fig1, ax1 = plt.subplots(figsize=(10, 8))
-    labels, actual_vals, max_vals = (
-        ["Source IPs", "Destination Ports"],
-        [ip_ent, port_ent],
-        [ip_max, port_max],
-    )
-    x, width = np.arange(len(labels)), 0.35
+    labels = ["Source IPs", "Destination Ports"]
+    vals1 = [ip_ent1, port_ent1]
+    vals2 = [ip_ent2, port_ent2]
+
+    x = np.arange(len(labels))
+    width = 0.35
 
     ax1.bar(
         x - width / 2,
-        actual_vals,
+        vals1,
         width,
-        label="Actual",
+        label=args.label1,
         color="#4C72B0",
         edgecolor="black",
         linewidth=1.5,
     )
     ax1.bar(
         x + width / 2,
-        max_vals,
+        vals2,
         width,
-        label="Max",
-        color="#DDDDDD",
+        label=args.label2,
+        color="#C44E52",
         edgecolor="black",
-        hatch="//",
         linewidth=1.5,
     )
+
     ax1.set_ylabel("Shannon Entropy (Bits)", fontweight="bold", labelpad=15)
     ax1.set_xticks(x)
     ax1.set_xticklabels(labels, fontweight="bold")
     ax1.grid(axis="y", linestyle="--", alpha=0.7)
-    ax1.set_ylim(0, max(max_vals) * 1.35)
-    ax1.legend(loc="upper right", framealpha=0.9, edgecolor="black", borderpad=0.8)
 
-    for i, v in enumerate(actual_vals):
+    # Remove top/right borders
+    ax1.spines["top"].set_visible(False)
+    ax1.spines["right"].set_visible(False)
+
+    max_val = max(max(vals1), max(vals2))
+    ax1.set_ylim(0, max_val * 1.3)
+    ax1.legend(loc="upper right", framealpha=0.9, edgecolor="black")
+
+    for i, v in enumerate(vals1):
         ax1.text(
             i - width / 2,
-            v + (max(max_vals) * 0.02),
+            v + (max_val * 0.02),
             f"{v:.2f}",
             ha="center",
             va="bottom",
             fontweight="bold",
-            fontsize=22,  # Updated to match standardized fonts
+            fontsize=20,
         )
-    for i, v in enumerate(max_vals):
+    for i, v in enumerate(vals2):
         ax1.text(
             i + width / 2,
-            v + (max(max_vals) * 0.02),
+            v + (max_val * 0.02),
             f"{v:.2f}",
             ha="center",
             va="bottom",
-            color="#555555",
-            fontsize=22,  # Updated to match standardized fonts
+            fontweight="bold",
+            fontsize=20,
         )
 
     plt.tight_layout()
     plt.savefig(out_entropy, dpi=300, bbox_inches="tight")
     plt.close(fig1)
 
-    # --- PHASE 4: Visualization (Graph 2 - Burstiness) ---
-    fig2, ax2 = plt.subplots(figsize=(12, 8))
-    iats_ms = iats * 1000
-    bins = np.logspace(np.log10(max(0.001, min(iats_ms))), np.log10(max(iats_ms)), 50)
+    # --- GRAPH 2: Overlaid Burstiness Histogram ---
+    fig2, ax2 = plt.subplots(figsize=(14, 8))
 
+    iats_ms1 = iats1 * 1000
+    iats_ms2 = iats2 * 1000
+
+    # Create unified logarithmic bins spanning the range of both datasets
+    min_val = max(0.001, min(np.min(iats_ms1), np.min(iats_ms2)))
+    max_val = max(np.max(iats_ms1), np.max(iats_ms2))
+    bins = np.logspace(np.log10(min_val), np.log10(max_val), 60)
+
+    # Overlay distributions (alpha=0.6 makes the overlap visually explicit)
     ax2.hist(
-        iats_ms,
+        iats_ms1,
+        bins=bins,
+        color="#4C72B0",
+        edgecolor="black",
+        alpha=0.6,
+        label=args.label1,
+    )
+    ax2.hist(
+        iats_ms2,
         bins=bins,
         color="#C44E52",
         edgecolor="black",
-        alpha=0.85,
-        linewidth=1.2,
+        alpha=0.6,
+        label=args.label2,
     )
+
     ax2.set_xscale("log")
     ax2.set_yscale("log")
     ax2.set_xlabel(
@@ -225,9 +251,15 @@ def main():
     ax2.set_ylabel("Frequency (Log Scale)", fontweight="bold", labelpad=15)
     ax2.grid(True, linestyle=":", alpha=0.7)
 
+    ax2.spines["top"].set_visible(False)
+    ax2.spines["right"].set_visible(False)
+    ax2.legend(loc="upper right", framealpha=0.9, edgecolor="black")
+
     plt.tight_layout()
     plt.savefig(out_burst, dpi=300, bbox_inches="tight")
     plt.close(fig2)
+
+    print(f"[+] Output saved to {out_entropy} and {out_burst}")
 
 
 if __name__ == "__main__":
