@@ -252,19 +252,35 @@ historical traffic, proving the degradation of standard thresholding.
 python3 7_evaluate_ids.py -b <baseline_csv> -t <test_csv> -o <output_dir> --baseline-label "Baseline Traffic" --test-label "Test Traffic"
 ```
 
-### Bash Script — `run_analysis.sh`
+### Bash Script — `run_yearly_analysis.sh`
 
 **NOTE: This script must be run within a Merit VM.**
 
-Iterates through the specified days of data of the specified month for two different years.
+Iterates through the specified hours of data of the specified days for two different years.
 It runs Python scripts 1-7 on the specified PCAP hours, feeding both datasets simultaneously to generate comparative outputs.
 
 When this script runs, it automatically creates the directory `analysis_results` (if it does not exist) within the project root directory.
-This directory holds the subdirectories containing the comparative results (e.g., `2021_vs_2025_03_combined`).
+This directory holds the subdirectories containing the comparative results (e.g., `2021_vs_2025_Yearly_Sample`).
 All of the `.png` and `.csv` files that are generated are located within their respective subdirectory.
 
 ```bash
-./run_analysis.sh <YEAR1> <YEAR2> <MM> <START_DAY> <END_DAY> "<HOURS>" [MAX_PACKETS]
+./run_yearly_analysis.sh <YEAR1> <YEAR2> "<TARGET_DAYS>" "<HOURS>" [MAX_PACKETS_PER_FILE]
+```
+
+#### Running Yearly Analysis
+
+Run the script in the background using `nohup` so if the SSH connection to the Merit VM drops,
+the `run_yearly_analysis.sh` process will keep running:
+
+```bash
+nohup ./run_yearly_analysis.sh 2021 2025 "15" "00 06 12 18" 2000000 &
+```
+
+You can view the script traversing through the months and processing the files in real-time
+by checking the output:
+
+```bash
+tail -f nohup.out
 ```
 
 ---
