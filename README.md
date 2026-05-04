@@ -273,14 +273,14 @@ Run the script in the background using `nohup` so if the SSH connection to the M
 the `run_yearly_analysis.sh` process will keep running:
 
 ```bash
-nohup ./run_yearly_analysis.sh 2021 2025 "15" "00 06 12 18" 2000000 &
+nohup ./run_yearly_analysis.sh 2021 2025 "15" "00 06 12 18" 2000000 > yearly_analysis.log 2>&1 &
 ```
 
 You can view the script traversing through the months and processing the files in real-time
 by checking the output:
 
 ```bash
-tail -f nohup.out
+tail -f yearly_analysis.log
 ```
 
 ---

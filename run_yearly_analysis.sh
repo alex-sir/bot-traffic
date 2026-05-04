@@ -74,38 +74,51 @@ echo "---------------------------------------------------"
 echo "[*] Running combined comparative pipeline on collected files..."
 echo "[*] Outputting results to: $OUTPUT_DIR"
 echo "---------------------------------------------------"
+echo ""
 
 # We define standard labels based on the years passed to the script
 LABEL1="${YEAR1} Baseline"
 LABEL2="${YEAR2} Bot Traffic"
 
 # 3. Run the scripts using the unbuffered flag (-u) for real-time nohup logging
+echo "---------------------------------------------------"
 echo "[*] Running Script 1: 1_pcap_overview.py..."
+echo "---------------------------------------------------"
 python3 -u 1_pcap_overview.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 echo ""
 
+echo "---------------------------------------------------"
 echo "[*] Running Script 2: 2_ics_port_analysis.py..."
+echo "---------------------------------------------------"
 python3 -u 2_ics_port_analysis.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 echo ""
 
+echo "---------------------------------------------------"
 echo "[*] Running Script 3: 3_entropy_burstiness.py..."
+echo "---------------------------------------------------"
 python3 -u 3_entropy_burstiness.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 echo ""
 
+echo "---------------------------------------------------"
 echo "[*] Running Script 4: 4_geo_analysis.py..."
+echo "---------------------------------------------------"
 python3 -u 4_geo_analysis.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -m1 "$MMDB_PATH1" -m2 "$MMDB_PATH2" -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 echo ""
 
+echo "---------------------------------------------------"
 echo "[*] Running Script 5: 5_ics_volume_shifts.py..."
+echo "---------------------------------------------------"
 python3 -u 5_ics_volume_shifts.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 echo ""
 
+echo "---------------------------------------------------"
 echo "[*] Running Script 6: 6_ids_timeseries.py..."
+echo "---------------------------------------------------"
 python3 -u 6_ids_timeseries.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
 echo ""
 
 echo "---------------------------------------------------"
-echo "[*] Running Script 7: 7_evaluate_ids.py (IDS Anomaly Simulation)..."
+echo "[*] Running Script 7: 7_evaluate_ids.py..."
 echo "---------------------------------------------------"
 
 BASELINE_CSV="$OUTPUT_DIR/${YEAR1}_baseline_ids_timeseries_1sec.csv"
@@ -113,5 +126,6 @@ TEST_CSV="$OUTPUT_DIR/${YEAR2}_bot_traffic_ids_timeseries_1sec.csv"
 
 python3 -u 7_evaluate_ids.py -b "$BASELINE_CSV" -t "$TEST_CSV" -o "$OUTPUT_DIR" --baseline-label "$LABEL1" --test-label "$LABEL2"
 
+echo ""
 echo "==================================================="
 echo "[+] Yearly distributed processing successfully completed!"
