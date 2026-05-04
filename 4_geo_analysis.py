@@ -12,14 +12,14 @@ Usage Instructions:
     Basic usage:
         python3 4_geo_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
                                   -m1 data/GeoLite2-2021.mmdb -m2 data/GeoLite2-2025.mmdb \
-                                  -l1 "2021" -l2 "2025"
+                                  -l1 "2021" -l2 "2025" \
                                   -n 1000000
 
     Example with custom output directory:
         python3 4_geo_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
                                   -m1 data/GeoLite2-2021.mmdb -m2 data/GeoLite2-2025.mmdb \
-                                  -l1 "2021" -l2 "2025"
-                                  -o output/
+                                  -l1 "2021 Baseline" -l2 "2025 Bot Traffic" \
+                                  -o output/ \
                                   -n 1000000
 """
 
@@ -55,6 +55,23 @@ plt.rcParams.update(
 )
 
 TOP_N = 15
+
+# --- NORMALIZATION DICTIONARY ---
+# MaxMind frequently updates country names to match geopolitical ISO changes.
+# This dictionary catches split records and maps them to a single standard name.
+COUNTRY_NORMALIZATION = {
+    "The Netherlands": "Netherlands",
+    "Türkiye": "Turkey",
+    "Czechia": "Czech Republic",
+    "North Macedonia": "Macedonia",
+    "Republic of Korea": "South Korea",
+    "Russian Federation": "Russia",
+    "Eswatini": "Swaziland",
+    "Syrian Arab Republic": "Syria",
+    "Iran (Islamic Republic of)": "Iran",
+    "Viet Nam": "Vietnam",
+    "Macao": "Macau",
+}
 
 
 def parse_args():
@@ -112,10 +129,14 @@ def get_ipv4_packet(buf, datalink):
 def lookup_country(reader, ip):
     try:
         res = reader.get(ip)
+        country = "Unknown"
         if res and "country" in res:
-            return res["country"].get("names", {}).get("en", "Unknown")
-        if res and "registered_country" in res:
-            return res["registered_country"].get("names", {}).get("en", "Unknown")
+            country = res["country"].get("names", {}).get("en", "Unknown")
+        elif res and "registered_country" in res:
+            country = res["registered_country"].get("names", {}).get("en", "Unknown")
+
+        # Apply normalization to fix MaxMind DB version inconsistencies
+        return COUNTRY_NORMALIZATION.get(country, country)
     except Exception:
         pass
     return "Unknown"
@@ -193,22 +214,50 @@ def main():
     ax.axis("tight")
     ax.axis("off")
 
+    # Format labels dynamically: only add a newline if the combined text is too long
+    header_label1 = (
+        f"{args.label1}\nPkts"
+        if len(f"{args.label1} Pkts") > 14
+        else f"{args.label1} Pkts"
+    )
+    header_label2 = (
+        f"{args.label2}\nPkts"
+        if len(f"{args.label2} Pkts") > 14
+        else f"{args.label2} Pkts"
+    )
+    headers = ["Country", header_label1, header_label2, "Δ (%)"]
+
+    # Determine a single, uniform font size for the entire header row
+    max_header_len = max(len(line) for h in headers for line in h.split("\n"))
+    header_size = 22
+    if max_header_len > 18:
+        header_size = 16
+    elif max_header_len > 12:
+        header_size = 18
+
     table = ax.table(
         cellText=table_data,
-        colLabels=["Country", f"{args.label1} Pkts", f"{args.label2} Pkts", "Δ (%)"],
+        colLabels=headers,
+        colWidths=[0.3, 0.25, 0.25, 0.2],  # Explicitly assign wider columns to the data
         loc="center",
         cellLoc="center",
     )
 
     table.auto_set_font_size(False)
     table.set_fontsize(20)
-    table.scale(1.2, 2.5)  # Scale to fit 4 columns gracefully
+    table.scale(1.0, 3.0)
 
-    # Colorize table elements
+    # Colorize table elements and apply uniform dynamic font sizing
     for (row, col), cell in table.get_celld().items():
         cell.set_edgecolor("#DDDDDD")
+
+        # Explicitly increase the padding so the text doesn't touch the borders
+        cell.PAD = 0.1
+
         if row == 0:
-            cell.set_text_props(weight="bold", color="white", size=22)
+            # Apply the globally determined header size
+            cell.set_text_props(weight="bold", color="white", size=header_size)
+
             if col == 0 or col == 3:
                 cell.set_facecolor("#2B475D")
             elif col == 1:
@@ -231,7 +280,6 @@ def main():
                     cell.set_text_props(
                         color="#218C74", weight="bold"
                     )  # Green for decline
-        cell.PAD = 0.05
 
     plt.tight_layout()
     plt.savefig(out_png, dpi=300, bbox_inches="tight")

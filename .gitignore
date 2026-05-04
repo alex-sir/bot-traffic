@@ -7,3 +7,4 @@ data/
 
 # Output files (.csv, .png, etc)
 output/
+analysis_results/

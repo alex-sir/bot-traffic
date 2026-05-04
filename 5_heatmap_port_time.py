@@ -1,5 +1,5 @@
 """
-Script 5: Delta Heatmap (ICS Port-over-Time)
+Script 5: Cross-Year Delta Heatmap (ICS Port-over-Time)
 
 Generates a "Difference Matrix" comparing two datasets exclusively for ICS ports.
 It aligns both captures to relative time (Minute 0, Minute 1, etc.),
@@ -10,15 +10,15 @@ Usage Instructions:
     Run the script from the terminal, providing paths to both sets of PCAP files.
 
     Basic usage:
-        python3 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
-                                       -l1 "2021" -l2 "2025" \
-                                       -n 1000000
+        python 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
+                                      -l1 "2021" -l2 "2025" \
+                                      -n 1000000
 
     Example with custom output directory:
-        python3 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
-                                       -l1 "2021" -l2 "2025" \
-                                       -o output/ \
-                                       -n 1000000
+        python 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
+                                      -l1 "2021" -l2 "2025" \
+                                      -o output/ \
+                                      -n 1000000
 """
 
 import argparse
@@ -136,6 +136,11 @@ def extract_heatmap_data(pcap_list, max_packets):
                 if packets_this_file >= max_packets:
                     break
 
+                # Ignore corrupt epoch 0 timestamps (1970)
+                # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing any modern PCAP.
+                if ts < 946684800:
+                    continue
+
                 # Establish the baseline time for this specific dataset
                 if t0 is None:
                     t0 = ts
@@ -156,7 +161,11 @@ def extract_heatmap_data(pcap_list, max_packets):
                 if port and port in ICS_PORTS:
                     # Calculate the relative time bin (e.g., Minute 0, Minute 1)
                     bin_id = int((ts - t0) / BIN_SECS)
-                    port_bins[port][bin_id] += 1
+
+                    # Cap the matrix size to prevent OOM crashes
+                    # 100,000 minutes = ~69 days. A corrupted packet jumping further ahead is dropped.
+                    if 0 <= bin_id <= 100000:
+                        port_bins[port][bin_id] += 1
 
     max_bin = max((b for d in port_bins.values() for b in d.keys()), default=0)
     return port_bins, max_bin

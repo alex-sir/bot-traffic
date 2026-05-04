@@ -191,7 +191,7 @@ def main():
     # Legend placed horizontally above the graph
     ax1.legend(
         loc="lower center",
-        bbox_to_anchor=(0.5, 1.05),
+        bbox_to_anchor=(0.5, 1),
         ncol=2,
         framealpha=0.9,
         edgecolor="black",
@@ -265,7 +265,7 @@ def main():
     # Legend placed horizontally above the graph
     ax2.legend(
         loc="lower center",
-        bbox_to_anchor=(0.5, 1.05),
+        bbox_to_anchor=(0.5, 1),
         ncol=2,
         framealpha=0.9,
         edgecolor="black",
