@@ -9,15 +9,15 @@ Usage Instructions:
     Run the script from the terminal, providing paths to both sets of PCAP files.
 
     Basic usage:
-        python3 6_ids_timeseries.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                    -l1 "2021" -l2 "2025" \
-                                    -n 1000000
+        python 6_ids_timeseries.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                   -l1 "2021" -l2 "2025" \
+                                   -n 1000000
 
     Example with custom output directory:
-        python3 6_ids_timeseries.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                    -l1 "2021" -l2 "2025" \
-                                    -o output/ \
-                                    -n 1000000
+        python 6_ids_timeseries.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                   -l1 "2021" -l2 "2025" \
+                                   -o output/ \
+                                   -n 1000000
 """
 
 import argparse
@@ -74,6 +74,12 @@ def extract_timeseries(pcap_list, max_packets, label, outdir):
                 for ts, buf in pcap:
                     if packets_this_file >= max_packets:
                         break
+
+                    # Ignore corrupt epoch 0 timestamps (1970)
+                    # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing modern PCAPs.
+                    if ts < 946684800:
+                        continue
+
                     packets_this_file += 1
 
                     # Truncate the timestamp to the nearest whole second

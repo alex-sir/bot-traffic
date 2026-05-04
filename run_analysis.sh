@@ -81,21 +81,46 @@ LABEL2="${YEAR2} Bot Traffic"
 
 # 3. Run the scripts, passing both datasets and their labels simultaneously
 # Note: PCAP variables are intentionally unquoted to allow argparse nargs='+' to read them as lists
+
+echo "---------------------------------------------------"
+echo "[*] Running Script 1: 1_pcap_overview.py..."
+echo "---------------------------------------------------"
 python3 1_pcap_overview.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+echo ""
 
+echo "---------------------------------------------------"
+echo "[*] Running Script 2: 2_ics_port_analysis.py..."
+echo "---------------------------------------------------"
 python3 2_ics_port_analysis.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+echo ""
 
+echo "---------------------------------------------------"
+echo "[*] Running Script 3: 3_entropy_burstiness.py..."
+echo "---------------------------------------------------"
 python3 3_entropy_burstiness.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+echo ""
 
+echo "---------------------------------------------------"
+echo "[*] Running Script 4: 4_geo_analysis.py..."
+echo "---------------------------------------------------"
 python3 4_geo_analysis.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -m1 "$MMDB_PATH1" -m2 "$MMDB_PATH2" -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+echo ""
 
+echo "---------------------------------------------------"
+echo "[*] Running Script 5: 5_heatmap_port_time.py..."
+echo "---------------------------------------------------"
 python3 5_heatmap_port_time.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+echo ""
 
+echo "---------------------------------------------------"
+echo "[*] Running Script 6: 6_ids_timeseries.py..."
+echo "---------------------------------------------------"
 python3 6_ids_timeseries.py -p1 $PCAP_LIST1 -p2 $PCAP_LIST2 -l1 "$LABEL1" -l2 "$LABEL2" -o "$OUTPUT_DIR" -n "$MAX_PACKETS"
+echo ""
 
 # 4. Automatically run Script 7 using the dynamically generated CSV files
 echo "---------------------------------------------------"
-echo "[*] Running IDS Anomaly Simulation (Script 7)..."
+echo "[*] Running Script 7: 7_evaluate_ids.py..."
 echo "---------------------------------------------------"
 
 # Predict the exact file names Script 6 just generated

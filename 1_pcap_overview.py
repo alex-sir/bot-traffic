@@ -8,15 +8,15 @@ Usage Instructions:
     Run the script from the terminal, providing the paths to your PCAP files.
 
     Basic usage:
-        python3 1_pcap_overview.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                   -l1 "2021" -l2 "2025" \
-                                   -n 1000000
+        python 1_pcap_overview.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                  -l1 "2021" -l2 "2025"
+                                  -n 1000000
 
     Example with custom output directory:
-        python3 1_pcap_overview.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                   -l1 "2021" -l2 "2025" \
-                                   -o output/ \
-                                   -n 1000000
+        python 1_pcap_overview.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                  -l1 "2021" -l2 "2025"
+                                  -o output/
+                                  -n 1000000
 """
 
 import argparse
@@ -114,7 +114,6 @@ def extract_stats(pcap_list, max_packets):
     """Encapsulated extraction function to process a list of files into metrics."""
     total_packets, total_bytes, ics_packets = 0, 0, 0
     protocols, src_ips, dst_ips, dst_ports = Counter(), Counter(), Counter(), Counter()
-    ics_protocols = Counter()
     active_duration_sec = 0
     t_start = None
 
@@ -130,6 +129,12 @@ def extract_stats(pcap_list, max_packets):
                 for ts, buf in pcap:
                     if packets_this_file >= max_packets:
                         break
+
+                    # Ignore corrupt epoch 0 timestamps (1970)
+                    # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing modern PCAPs.
+                    if ts < 946684800:
+                        continue
+
                     packets_this_file += 1
                     total_packets += 1
                     total_bytes += len(buf)
@@ -161,7 +166,6 @@ def extract_stats(pcap_list, max_packets):
 
                         if port and port in ICS_PORTS:
                             ics_packets += 1
-                            ics_protocols[ICS_PORTS[port]] += 1
                     else:
                         protocols["Non-IP"] += 1
 
@@ -186,7 +190,7 @@ def extract_stats(pcap_list, max_packets):
     volume_mb = total_bytes / (1024 * 1024)
     bandwidth_mbps = (total_bytes * 8 / 1_000_000) / active_duration_sec
     pkt_rate = total_packets / active_duration_sec
-    dominant_ics_proto = ics_protocols.most_common(1)[0][0] if ics_protocols else "N/A"
+    dominant_proto = protocols.most_common(1)[0][0] if protocols else "N/A"
 
     ics_percentage = (ics_packets / total_packets) * 100 if total_packets > 0 else 0
     non_ics_packets = total_packets - ics_packets
@@ -202,7 +206,7 @@ def extract_stats(pcap_list, max_packets):
         "Total Volume": f"{volume_mb:.2f} MB",
         "Avg Packet Rate": f"{pkt_rate:.1f} pkts/s",
         "Avg Bandwidth": f"{bandwidth_mbps:.3f} Mbps",
-        "Dominant ICS Protocol": f"{dominant_ics_proto}",
+        "Dominant Protocol": f"{dominant_proto}",
         "ICS Traffic": f"{ics_percentage:.4f}% ({ics_packets:,})",
         "Non-ICS Traffic": f"{non_ics_percentage:.4f}% ({non_ics_packets:,})",
         "Unique Src IPs": f"{len(src_ips):,}",
