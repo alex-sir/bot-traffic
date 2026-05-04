@@ -68,15 +68,21 @@ def main():
     df_baseline = pd.read_csv(args.baseline)
     df_test = pd.read_csv(args.test)
 
-    # 1. Establish the Baseline Metrics
-    mean_baseline = df_baseline["packet_count"].mean()
-    std_baseline = df_baseline["packet_count"].std()
+    # --- PROTECTION AGAINST OUTLIERS ---
+    # Calculate the 99.5th percentile to identify extreme anomalous spikes.
+    # We drop these temporarily so they don't artificially inflate the standard deviation.
+    cap = df_baseline["packet_count"].quantile(0.995)
+    clean_baseline = df_baseline[df_baseline["packet_count"] <= cap]
+
+    # 1. Establish the Baseline Metrics on the CLEAN dataset
+    mean_baseline = clean_baseline["packet_count"].mean()
+    std_baseline = clean_baseline["packet_count"].std()
 
     # Anomaly Threshold: 99.7% confidence interval (Mean + 3 Standard Deviations)
     threshold = mean_baseline + (3 * std_baseline)
 
     # 2. Evaluate Degradation
-    # Calculate how often the baseline triggered its own threshold (Should be < 1%)
+    # Calculate how often the full, raw baseline triggered its own threshold
     violations_baseline = len(df_baseline[df_baseline["packet_count"] > threshold])
     fpr_baseline = (violations_baseline / len(df_baseline)) * 100
 
@@ -85,6 +91,7 @@ def main():
     fpr_test = (violations_test / len(df_test)) * 100
 
     print("--- IDS Simulation Results ---")
+    print(f"[{args.baseline_label} Outlier Cap Set At: {cap:.0f} pkts/sec]")
     print(f"{args.baseline_label} Mean: {mean_baseline:.2f} pkts/sec")
     print(f"IDS Threshold: {threshold:.2f} pkts/sec")
     print(f"{args.baseline_label} Self-Violation Rate: {fpr_baseline:.2f}%")
@@ -93,7 +100,7 @@ def main():
     # 3. Visualization
     fig, ax = plt.subplots(figsize=(16, 8))
 
-    # Plot the distributions of both datasets
+    # Plot the full, raw distributions of both datasets so reality is not hidden
     ax.hist(
         df_baseline["packet_count"],
         bins=50,
@@ -128,8 +135,6 @@ def main():
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    # MOVED LEGEND: Placed outside the plot area (above it) in a horizontal row
-    # so it mathematically can never overlap with the data distributions.
     ax.legend(
         loc="lower center",
         bbox_to_anchor=(0.5, 1.05),

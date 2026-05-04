@@ -10,15 +10,15 @@ Usage Instructions:
     Run the script from the terminal, providing paths to both sets of PCAP files.
 
     Basic usage:
-        python 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
-                                      -l1 "2021" -l2 "2025" \
-                                      -n 1000000
+        python3 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
+                                       -l1 "2021" -l2 "2025" \
+                                       -n 1000000
 
     Example with custom output directory:
-        python 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
-                                      -l1 "2021" -l2 "2025" \
-                                      -o output/ \
-                                      -n 1000000
+        python3 5_heatmap_port_time.py -p1 data/2021/*.pcap -p2 data/2025/*.pcap \
+                                       -l1 "2021" -l2 "2025" \
+                                       -o output/ \
+                                       -n 1000000
 """
 
 import argparse
@@ -129,45 +129,47 @@ def extract_heatmap_data(pcap_list, max_packets):
         print(f"[*] Parsing {os.path.basename(pcap_file)}...")
         packets_this_file = 0
 
-        with open_pcap(pcap_file) as f:
-            pcap = dpkt.pcap.Reader(f)
-            datalink = pcap.datalink()
-            for ts, buf in pcap:
-                if packets_this_file >= max_packets:
-                    break
+        try:
+            with open_pcap(pcap_file) as f:
+                pcap = dpkt.pcap.Reader(f)
+                datalink = pcap.datalink()
+                for ts, buf in pcap:
+                    if packets_this_file >= max_packets:
+                        break
 
-                # Ignore corrupt epoch 0 timestamps (1970)
-                # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing any modern PCAP.
-                if ts < 946684800:
-                    continue
+                    # Ignore corrupt epoch 0 timestamps (1970)
+                    # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing any modern PCAP.
+                    if ts < 946684800:
+                        continue
 
-                # Establish the baseline time for this specific dataset
-                if t0 is None:
-                    t0 = ts
+                    # Establish the baseline time for this specific dataset
+                    if t0 is None:
+                        t0 = ts
 
-                packets_this_file += 1
-                ip = get_ipv4_packet(buf, datalink)
-                if not ip:
-                    continue
+                    packets_this_file += 1
+                    ip = get_ipv4_packet(buf, datalink)
+                    if not ip:
+                        continue
 
-                port = None
-                if ip.p in (6, 17):
-                    try:
-                        port = ip.data.dport
-                    except:
-                        pass
+                    port = None
+                    if ip.p in (6, 17):
+                        try:
+                            port = ip.data.dport
+                        except:
+                            pass
 
-                # Filter specifically for ICS ports
-                if port and port in ICS_PORTS:
-                    # Calculate the relative time bin (e.g., Minute 0, Minute 1)
-                    bin_id = int((ts - t0) / BIN_SECS)
+                    # Filter specifically for ICS ports
+                    if port and port in ICS_PORTS:
+                        bin_id = int((ts - t0) / BIN_SECS)
 
-                    # Cap the matrix size to prevent OOM crashes
-                    # 100,000 minutes = ~69 days. A corrupted packet jumping further ahead is dropped.
-                    if 0 <= bin_id <= 100000:
-                        port_bins[port][bin_id] += 1
+                        # 1-year continuous cap (525,600 minutes).
+                        # Safely allows extensive longitudinal analysis while blocking 30-year mathematical voids.
+                        if 0 <= bin_id <= 525600:
+                            port_bins[port][bin_id] += 1
+        except Exception as e:
+            print(f"[-] Error parsing {pcap_file}: {e}")
 
-    max_bin = max((b for d in port_bins.values() for b in d.keys()), default=0)
+    max_bin = max([b for d in port_bins.values() for b in d.keys()] + [0])
     return port_bins, max_bin
 
 
@@ -184,19 +186,23 @@ def main():
     bins2, max_bin2 = extract_heatmap_data(args.pcap2, args.max_packets)
 
     # --- PHASE 2: Matrix Alignment & Delta Calculation ---
-    # Ensure both matrices have the same number of columns so they can be subtracted
     global_max_bin = max(max_bin1, max_bin2)
     all_bins = list(range(global_max_bin + 1))
 
     port_keys = list(ICS_PORTS.keys())
     port_labels = [f"{ICS_PORTS[p]} ({p})" for p in port_keys]
 
-    matrix1 = np.array(
-        [[bins1[p].get(b, 0) for b in all_bins] for p in port_keys], dtype=float
-    )
-    matrix2 = np.array(
-        [[bins2[p].get(b, 0) for b in all_bins] for p in port_keys], dtype=float
-    )
+    # Pre-allocate NumPy arrays of zeros instead of building massive Python lists.
+    matrix1 = np.zeros((len(port_keys), global_max_bin + 1), dtype=float)
+    matrix2 = np.zeros((len(port_keys), global_max_bin + 1), dtype=float)
+
+    for i, p in enumerate(port_keys):
+        for b, count in bins1[p].items():
+            if b <= global_max_bin:
+                matrix1[i, b] = count
+        for b, count in bins2[p].items():
+            if b <= global_max_bin:
+                matrix2[i, b] = count
 
     # Calculate the Difference (Newer Dataset - Older Dataset)
     delta_matrix = matrix2 - matrix1
@@ -209,7 +215,7 @@ def main():
     # Calculate the maximum absolute value to center the diverging colormap strictly at 0
     abs_max = max(abs(delta_matrix.max()), abs(delta_matrix.min()))
     if abs_max == 0:
-        abs_max = 1  # Prevent division by zero if datasets are identical
+        abs_max = 1
 
     # RdBu_r provides a classic "Heat/Cold" visual. Red = Growth, Blue = Decline.
     im = ax.imshow(
@@ -228,14 +234,13 @@ def main():
     ax.set_yticklabels(port_labels)
     ax.set_ylabel("Targeted Protocol / Port", labelpad=20, fontweight="bold")
 
-    # Time labels are now relative to the start of the capture (e.g., T+0, T+1)
-    time_labels = [f"T+{b}" for b in all_bins]
+    # Time labels memory optimization (only generating labels for visible ticks)
     tick_spacing = max(1, len(all_bins) // 30)
+    tick_positions = list(range(0, len(all_bins), tick_spacing))
+    time_labels = [f"T+{b}" for b in tick_positions]
 
-    ax.set_xticks(range(0, len(all_bins), tick_spacing))
-    ax.set_xticklabels(
-        [time_labels[i] for i in range(0, len(all_bins), tick_spacing)], rotation=0
-    )
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(time_labels, rotation=0)
     ax.set_xlabel(
         f"Relative Time Bins ({BIN_SECS}-Second Intervals)",
         labelpad=20,
@@ -248,10 +253,7 @@ def main():
             for j in range(len(all_bins)):
                 val = int(delta_matrix[i, j])
                 if val != 0:
-                    # Format text to explicitly show the direction of the delta (+ or -)
                     text_str = f"+{val:,}" if val > 0 else f"{val:,}"
-
-                    # Ensure text is readable against both dark red and dark blue backgrounds
                     intensity = abs(val) / abs_max
                     text_color = "white" if intensity > 0.5 else "black"
 
@@ -279,14 +281,17 @@ def main():
     plt.tight_layout()
     plt.savefig(out_png, dpi=300, bbox_inches="tight")
 
-    # Save the raw delta calculations to a CSV
+    # Transpose the DataFrame (.T).
+    # By making the time bins rows and the ports columns, we bypass the Pandas block manager OOM issue.
     df = pd.DataFrame(
-        delta_matrix.astype(int),
-        index=port_labels,
-        columns=[f"bin_{b}" for b in all_bins],
+        delta_matrix.astype(int).T,
+        index=[f"T+{b}" for b in all_bins],
+        columns=port_labels,
     )
+    df.index.name = "Relative_Time_Bin"
     df.to_csv(out_csv)
     print(f"[+] Delta Heatmap saved to {out_png}")
+    print(f"[+] Heatmap CSV data saved to {out_csv}")
 
 
 if __name__ == "__main__":

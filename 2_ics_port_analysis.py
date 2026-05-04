@@ -120,7 +120,10 @@ def extract_ics_data(pcap_list, max_packets):
     using a dynamically scaling threshold.
     """
     ics_hits = Counter()
-    dst_ips_per_port = defaultdict(list)
+
+    # Using a set instead of a list instantly drops duplicates upon ingestion,
+    # strictly limiting the memory footprint to the unique IPs targeted.
+    dst_ips_per_port = defaultdict(set)
     total_packets_parsed = 0
 
     for pcap_file in pcap_list:
@@ -132,6 +135,11 @@ def extract_ics_data(pcap_list, max_packets):
                 for ts, buf in pcap:
                     if packets_this_file >= max_packets:
                         break
+
+                    # Ignore corrupt epoch 0 timestamps (1970)
+                    # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing any modern PCAP.
+                    if ts < 946684800:
+                        continue
 
                     packets_this_file += 1
                     total_packets_parsed += 1
@@ -147,20 +155,15 @@ def extract_ics_data(pcap_list, max_packets):
                         except:
                             pass
 
-                    # Log the hit and the targeted IP address if it matches an ICS port
+                    # Log the hit and uniquely store the targeted IP address
                     if port and port in ICS_PORTS:
                         proto = ICS_PORTS[port]
                         ics_hits[proto] += 1
-                        dst_ips_per_port[proto].append(ip.dst)
+                        dst_ips_per_port[proto].add(ip.dst)
         except Exception as e:
             print(f"[-] Error parsing {pcap_file}: {e}")
 
     # --- DYNAMIC THRESHOLD CALCULATION ---
-    # We scale the threshold based on the total volume of traffic analyzed.
-    # A massive capture window increases the likelihood of dropped packets or
-    # interleaved noise, mathematically widening the observed gap of an
-    # otherwise sequential scan.
-    # Rule: Base threshold of 5, scaling +1 for every 50,000 packets analyzed.
     dynamic_threshold = max(5, total_packets_parsed / 50000)
 
     # Calculate Scanning Patterns (Sequential vs. Random)
@@ -170,8 +173,8 @@ def extract_ics_data(pcap_list, max_packets):
             patterns[proto] = ""
             continue
         try:
-            # Convert binary IP addresses to integers to find mathematical gaps
-            int_ips = sorted(set(struct.unpack("!I", ip_bytes)[0] for ip_bytes in ips))
+            # The ips variable is already a set of unique values, so we just convert directly
+            int_ips = sorted(struct.unpack("!I", ip_bytes)[0] for ip_bytes in ips)
 
             # Calculate the numeric distance between each sequentially targeted IP
             diffs = [int_ips[i + 1] - int_ips[i] for i in range(len(int_ips) - 1)]
@@ -180,7 +183,7 @@ def extract_ics_data(pcap_list, max_packets):
             # Compare against the dynamically generated threshold
             pat_type = "Seq" if avg_gap <= dynamic_threshold else "Rnd"
 
-            # Format the output string to strictly show the pattern and calculated gap
+            # Format the output string
             patterns[proto] = f"{pat_type} (Gap: {avg_gap:.1f})"
         except Exception:
             patterns[proto] = ""
@@ -224,7 +227,7 @@ def main():
 
     # Separation variables: Bars thickened (0.90), wide offset prevents text overlap
     bar_thickness = 0.90
-    offset = 0.65  # Pushes the bars further apart from the center of their group
+    offset = 0.65
 
     # Grouped bars - Explicit offset used to create visual spacing between the datasets
     bars1 = ax.barh(

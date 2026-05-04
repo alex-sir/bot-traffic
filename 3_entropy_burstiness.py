@@ -24,6 +24,7 @@ import math
 import os
 import gzip
 import dpkt
+import array
 from collections import Counter
 import numpy as np
 import matplotlib
@@ -100,12 +101,16 @@ def calc_entropy(counter):
 
 def extract_data(pcap_list, max_packets):
     src_ips, dst_ports = Counter(), Counter()
-    all_iats = []
+
+    # Chunking list for NumPy arrays
+    all_iats_chunks = []
 
     for pcap_file in pcap_list:
         print(f"[*] Parsing {os.path.basename(pcap_file)}...")
         packets_this_file = 0
-        file_timestamps = []
+
+        # Use a raw C-type double array to practically eliminate object overhead
+        file_timestamps = array.array("d")
 
         try:
             with open_pcap(pcap_file) as f:
@@ -116,8 +121,8 @@ def extract_data(pcap_list, max_packets):
                         break
 
                     # Ignore corrupt epoch 0 timestamps (1970)
-                    # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing modern PCAPs.
-                    if ts < 946684800:
+                    # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing any modern PCAP.
+                    if ts < 946684800 or ts > 2000000000:
                         continue
 
                     packets_this_file += 1
@@ -132,13 +137,23 @@ def extract_data(pcap_list, max_packets):
                             except:
                                 pass
 
-            file_timestamps.sort()
             if len(file_timestamps) > 1:
-                all_iats.extend(np.diff(file_timestamps))
+                # Convert straight to a NumPy array for fast C-level math and sorting
+                ts_arr = np.array(file_timestamps, dtype=np.float64)
+                ts_arr.sort()
+
+                # Append only the final calculated diffs, instantly freeing the large array memory
+                all_iats_chunks.append(np.diff(ts_arr))
+
         except Exception as e:
             print(f"[-] Error parsing {pcap_file}: {e}")
 
-    iats = np.array(all_iats)
+    # Concatenate all the memory-efficient chunks at the very end
+    if all_iats_chunks:
+        iats = np.concatenate(all_iats_chunks)
+    else:
+        iats = np.array([])
+
     return calc_entropy(src_ips), calc_entropy(dst_ports), iats
 
 

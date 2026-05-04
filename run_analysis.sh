@@ -74,6 +74,7 @@ echo "---------------------------------------------------"
 echo "[*] Running combined comparative pipeline on collected files..."
 echo "[*] Outputting results to: $OUTPUT_DIR"
 echo "---------------------------------------------------"
+echo ""
 
 # We define standard labels based on the years passed to the script
 LABEL1="${YEAR1} Baseline"
@@ -129,5 +130,6 @@ TEST_CSV="$OUTPUT_DIR/${YEAR2}_bot_traffic_ids_timeseries_1sec.csv"
 
 python3 7_evaluate_ids.py -b "$BASELINE_CSV" -t "$TEST_CSV" -o "$OUTPUT_DIR" --baseline-label "$LABEL1" --test-label "$LABEL2"
 
+echo ""
 echo "==================================================="
 echo "[+] Combined processing successfully completed!"

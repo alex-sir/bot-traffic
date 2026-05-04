@@ -8,15 +8,15 @@ Usage Instructions:
     Run the script from the terminal, providing the paths to your PCAP files.
 
     Basic usage:
-        python 1_pcap_overview.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                  -l1 "2021" -l2 "2025"
-                                  -n 1000000
+        python3 1_pcap_overview.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                   -l1 "2021" -l2 "2025" \
+                                   -n 1000000
 
     Example with custom output directory:
-        python 1_pcap_overview.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                  -l1 "2021" -l2 "2025"
-                                  -o output/
-                                  -n 1000000
+        python3 1_pcap_overview.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
+                                   -l1 "2021" -l2 "2025" \
+                                   -o output/ \
+                                   -n 1000000
 """
 
 import argparse
@@ -120,7 +120,10 @@ def extract_stats(pcap_list, max_packets):
     for pcap_file in pcap_list:
         print(f"[*] Parsing {os.path.basename(pcap_file)}...")
         packets_this_file = 0
-        file_timestamps = []
+
+        # List uses O(1) rolling markers
+        file_start = None
+        file_end = None
 
         try:
             with open_pcap(pcap_file) as f:
@@ -131,7 +134,7 @@ def extract_stats(pcap_list, max_packets):
                         break
 
                     # Ignore corrupt epoch 0 timestamps (1970)
-                    # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing modern PCAPs.
+                    # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing any modern PCAP.
                     if ts < 946684800:
                         continue
 
@@ -139,9 +142,14 @@ def extract_stats(pcap_list, max_packets):
                     total_packets += 1
                     total_bytes += len(buf)
 
+                    # Update rolling markers for duration calculations
+                    if file_start is None or ts < file_start:
+                        file_start = ts
+                    if file_end is None or ts > file_end:
+                        file_end = ts
+
                     ip = get_ipv4_packet(buf, datalink)
                     if ip:
-                        file_timestamps.append(ts)
                         src_ips[ip.src] += 1
                         dst_ips[ip.dst] += 1
                         port = None
@@ -169,11 +177,10 @@ def extract_stats(pcap_list, max_packets):
                     else:
                         protocols["Non-IP"] += 1
 
-            if file_timestamps:
-                file_start = min(file_timestamps)
+            if file_start is not None:
                 if t_start is None or file_start < t_start:
                     t_start = file_start
-                active_duration_sec += max(file_timestamps) - file_start
+                active_duration_sec += file_end - file_start
         except Exception as e:
             print(f"[-] Error parsing {pcap_file}: {e}")
 
@@ -226,7 +233,7 @@ def main():
     stats2 = extract_stats(args.pcap2, args.max_packets)
 
     # --- Visualization ---
-    fig, ax = plt.subplots(figsize=(14, 8))  # Wider to accommodate 3 columns
+    fig, ax = plt.subplots(figsize=(14, 8))
     ax.axis("tight")
     ax.axis("off")
 
@@ -245,19 +252,18 @@ def main():
 
     table.auto_set_font_size(False)
     table.set_fontsize(18)
-    table.scale(1.2, 2.5)  # Scale matrix to fit content cleanly
+    table.scale(1.2, 2.5)
 
     for (row, col), cell in table.get_celld().items():
         cell.set_edgecolor("#DDDDDD")
         if row == 0:
             cell.set_text_props(weight="bold", color="white", size=20)
-            # Use distinct header colors for the labels to help visual separation
             if col == 0:
                 cell.set_facecolor("#2B475D")
             elif col == 1:
-                cell.set_facecolor("#4C72B0")  # Blue for Dataset 1
+                cell.set_facecolor("#4C72B0")
             else:
-                cell.set_facecolor("#C44E52")  # Red for Dataset 2
+                cell.set_facecolor("#C44E52")
             cell.set_text_props(ha="center")
         else:
             cell.set_facecolor("#F8F9FA" if row % 2 == 0 else "#FFFFFF")
