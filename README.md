@@ -220,14 +220,14 @@ Maps source IPs to countries using MaxMind DB files for their respective years. 
 python3 4_geo_analysis.py -p1 <pcap_dir1> -p2 <pcap_dir2> -m1 <mmdb_file1> -m2 <mmdb_file2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
-### Script 5 — `5_heatmap_port_time.py`
+### Script 5 — `5_ics_volume_shifts.py`
 
 **Topic: Statistical Analysis**
-Builds an explicitly defined, high-resolution Delta "Difference Matrix" heatmap. It aligns both captures to relative time, subtracts the traffic volume of the baseline from the newer dataset, and highlights surges or drops in activity specifically on ICS ports.
-**Outputs:** `ics_heatmap_delta.png`, `ics_heatmap_delta.csv`
+Generates a connected dot plot (Dumbbell Plot) comparing the top 15 ICS ports with the most drastic volume changes between two datasets. It draws a line between the baseline volume and test volume, visually representing the net delta to identify massive surges or drop-offs efficiently.
+**Outputs:** `ics_top_deltas.png`, `ics_top_deltas.csv`
 
 ```bash
-python3 5_heatmap_port_time.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
+python3 5_ics_volume_shifts.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffic" -l2 "Test Traffic" -o <output_dir> -n <max_packets>
 ```
 
 ### Script 6 — `6_ids_timeseries.py`
@@ -271,17 +271,17 @@ All of the `.png` and `.csv` files that are generated are located within their r
 
 ## Output Files Summary
 
-| File                              | Produced by | Description                                                   |
-| --------------------------------- | ----------- | ------------------------------------------------------------- |
-| `pcap_overview.png`               | Script 1    | Cross-Year core metrics and statistics summary table          |
-| `ics_ports.png`                   | Script 2    | Grouped cross-year ICS port targeting and scanning chart      |
-| `entropy.png`                     | Script 3    | Grouped cross-year Shannon entropy bar chart                  |
-| `burstiness.png`                  | Script 3    | Overlaid cross-year Inter-Arrival Time (IAT) histogram        |
-| `geo_analysis.png`                | Script 4    | Cross-Year geographic shift table tracking volume delta       |
-| `ics_heatmap_delta.png`           | Script 5    | Delta "Difference Matrix" heatmap for ICS port activity       |
-| `ics_heatmap_delta.csv`           | Script 5    | Raw CSV data backing the delta heatmap matrix                 |
-| `<label>_ids_timeseries_1sec.csv` | Script 6    | Raw CSV time-series data for both datasets for IDS simulation |
-| `ids_degradation.png`             | Script 7    | Cross-Year IDS anomaly simulation results and threshold chart |
+| File                              | Produced by | Description                                                       |
+| --------------------------------- | ----------- | ----------------------------------------------------------------- |
+| `pcap_overview.png`               | Script 1    | Cross-Year core metrics and statistics summary table              |
+| `ics_ports.png`                   | Script 2    | Grouped cross-year ICS port targeting and scanning chart          |
+| `entropy.png`                     | Script 3    | Grouped cross-year Shannon entropy bar chart                      |
+| `burstiness.png`                  | Script 3    | Overlaid cross-year Inter-Arrival Time (IAT) histogram            |
+| `geo_analysis.png`                | Script 4    | Cross-Year geographic shift table tracking volume delta           |
+| `ics_top_deltas.png`              | Script 5    | Connected dot plot (Dumbbell Plot) for top ICS port volume shifts |
+| `ics_top_deltas.csv`              | Script 5    | Raw CSV data backing the top delta dumbbell plot                  |
+| `<label>_ids_timeseries_1sec.csv` | Script 6    | Raw CSV time-series data for both datasets for IDS simulation     |
+| `ids_degradation.png`             | Script 7    | Cross-Year IDS anomaly simulation results and threshold chart     |
 
 ---
 
@@ -291,7 +291,7 @@ All of the `.png` and `.csv` files that are generated are located within their r
 2. Script 2 (ICS targeting and gap findings)
 3. Script 3 (entropy and burstiness distribution metrics)
 4. Script 4 (geo analysis table and delta shift)
-5. Script 5 (delta heatmap visualization)
+5. Script 5 (top ICS volume shifts dumbbell plot)
 6. Script 6 (IDS time-series data)
 7. Script 7 (IDS simulation results)
 

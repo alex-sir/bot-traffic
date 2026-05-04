@@ -16,7 +16,7 @@ Usage Instructions:
 
     Example with custom output directory:
         python3 2_ics_port_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
-                                       -l1 "2021 Baseline" -l2 "2025 Bot Traffic" \
+                                       -l1 "2021" -l2 "2025" \
                                        -o output/ \
                                        -n 1000000
 """

@@ -18,7 +18,7 @@ Usage Instructions:
     Example with custom output directory:
         python3 4_geo_analysis.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
                                   -m1 data/GeoLite2-2021.mmdb -m2 data/GeoLite2-2025.mmdb \
-                                  -l1 "2021 Baseline" -l2 "2025 Bot Traffic" \
+                                  -l1 "2021" -l2 "2025" \
                                   -o output/ \
                                   -n 1000000
 """
