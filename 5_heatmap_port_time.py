@@ -138,8 +138,7 @@ def extract_heatmap_data(pcap_list, max_packets):
                         break
 
                     # Ignore corrupt epoch 0 timestamps (1970)
-                    # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing any modern PCAP.
-                    if ts < 946684800:
+                    if ts < 946684800 or ts > 2000000000:
                         continue
 
                     # Establish the baseline time for this specific dataset
@@ -163,7 +162,6 @@ def extract_heatmap_data(pcap_list, max_packets):
                         bin_id = int((ts - t0) / BIN_SECS)
 
                         # 1-year continuous cap (525,600 minutes).
-                        # Safely allows extensive longitudinal analysis while blocking 30-year mathematical voids.
                         if 0 <= bin_id <= 525600:
                             port_bins[port][bin_id] += 1
         except Exception as e:
@@ -225,9 +223,17 @@ def main():
         norm=mcolors.TwoSlopeNorm(vmin=-abs_max, vcenter=0, vmax=abs_max),
     )
 
-    ax.set_xticks(np.arange(-0.5, len(all_bins), 1), minor=True)
-    ax.set_yticks(np.arange(-0.5, len(port_keys), 1), minor=True)
-    ax.grid(which="minor", color="black", linestyle="-", linewidth=1.5)
+    # Context-aware grid lines.
+    # Only draw vertical minor lines if the bin count is small enough to not crash matplotlib.
+    if len(all_bins) <= 100:
+        ax.set_xticks(np.arange(-0.5, len(all_bins), 1), minor=True)
+        ax.set_yticks(np.arange(-0.5, len(port_keys), 1), minor=True)
+        ax.grid(which="minor", color="black", linestyle="-", linewidth=1.5)
+    else:
+        # For large datasets, only draw horizontal gridlines to separate the ports cleanly
+        ax.set_yticks(np.arange(-0.5, len(port_keys), 1), minor=True)
+        ax.grid(which="minor", axis="y", color="black", linestyle="-", linewidth=1.5)
+
     ax.grid(which="major", visible=False)
 
     ax.set_yticks(range(len(port_labels)))
