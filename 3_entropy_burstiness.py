@@ -45,9 +45,9 @@ plt.rcParams.update(
     }
 )
 
-# STATIC BINS: Pre-define the logarithmic bins spanning 1 microsecond (0.001 ms) to ~2.7 hours (10^7 ms).
-# This allows us to accumulate counts on the fly without storing millions of raw data points.
-BINS = np.logspace(-3, 7, 60)
+# STATIC BINS: Pre-define the logarithmic bins spanning 1 microsecond (0.001 ms) to 1 second (10^3 ms).
+# This frames high-volume network telescope data without leaving empty whitespace.
+BINS = np.logspace(-3, 3, 60)
 
 
 def parse_args():
@@ -125,7 +125,6 @@ def extract_data(pcap_list, max_packets):
                         break
 
                     # Ignore corrupt epoch 0 timestamps (1970)
-                    # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing any modern PCAP.
                     if ts < 946684800 or ts > 2000000000:
                         continue
 
@@ -280,6 +279,9 @@ def main():
 
     ax2.spines["top"].set_visible(False)
     ax2.spines["right"].set_visible(False)
+
+    # Limit the X-axis tightly to the defined bins
+    ax2.set_xlim(BINS[0], BINS[-1])
 
     # Legend placed horizontally above the graph
     ax2.legend(
