@@ -1,8 +1,9 @@
 """
-Script 7: IDS Anomaly Simulation
+Script 7: IDS Anomaly Simulation & Sensitivity Trade-off
 
-Compares a test traffic timeline against a strict IDS baseline
-established by historical traffic, proving the degradation of standard thresholding.
+Compares a test traffic timeline against a strict IDS baseline, evaluating 
+standard threshold degradation and the False Positive trade-offs of 
+increased detection sensitivity.
 
 Usage Instructions:
     Run the script from the terminal, providing the paths to the CSV files.
@@ -22,6 +23,7 @@ Usage Instructions:
 """
 
 import argparse
+import os
 import pandas as pd
 import matplotlib
 
@@ -43,12 +45,13 @@ plt.rcParams.update(
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="IDS Evaluation Simulation")
+    parser = argparse.ArgumentParser(
+        description="IDS Evaluation & Sensitivity Simulation"
+    )
     parser.add_argument("-b", "--baseline", required=True, help="Path to Baseline CSV")
     parser.add_argument("-t", "--test", required=True, help="Path to Test CSV")
     parser.add_argument("-o", "--outdir", default="output", help="Output directory")
 
-    # Dynamic labels for graph legends and terminal output
     parser.add_argument(
         "--baseline-label",
         default="Baseline Traffic",
@@ -63,44 +66,97 @@ def parse_args():
 
 def main():
     args = parse_args()
+    os.makedirs(args.outdir, exist_ok=True)
 
     # Load the data
     df_baseline = pd.read_csv(args.baseline)
     df_test = pd.read_csv(args.test)
 
     # --- PROTECTION AGAINST OUTLIERS ---
-    # Calculate the 99.5th percentile to identify extreme anomalous spikes.
-    # We drop these temporarily so they don't artificially inflate the standard deviation.
     cap = df_baseline["packet_count"].quantile(0.995)
     clean_baseline = df_baseline[df_baseline["packet_count"] <= cap]
 
-    # 1. Establish the Baseline Metrics on the CLEAN dataset
+    # 1. Establish the Standard Baseline Metrics
     mean_baseline = clean_baseline["packet_count"].mean()
     std_baseline = clean_baseline["packet_count"].std()
 
-    # Anomaly Threshold: 99.7% confidence interval (Mean + 3 Standard Deviations)
-    threshold = mean_baseline + (3 * std_baseline)
+    # Standard Anomaly Threshold: Mean + 3 Standard Deviations
+    std_threshold = mean_baseline + (3 * std_baseline)
 
-    # 2. Evaluate Degradation
-    # Calculate how often the full, raw baseline triggered its own threshold
-    violations_baseline = len(df_baseline[df_baseline["packet_count"] > threshold])
-    fpr_baseline = (violations_baseline / len(df_baseline)) * 100
+    # 2. Evaluate Standard Degradation (Default Configuration)
+    std_violations_baseline = len(
+        df_baseline[df_baseline["packet_count"] > std_threshold]
+    )
+    std_fpr_baseline = (std_violations_baseline / len(df_baseline)) * 100
 
-    # Calculate how often the structured test traffic triggers the baseline threshold
-    violations_test = len(df_test[df_test["packet_count"] > threshold])
-    fpr_test = (violations_test / len(df_test)) * 100
+    std_violations_test = len(df_test[df_test["packet_count"] > std_threshold])
+    std_detection_rate = (std_violations_test / len(df_test)) * 100
+    std_evasion_rate = 100.0 - std_detection_rate
 
-    print("--- IDS Simulation Results ---")
-    print(f"[{args.baseline_label} Outlier Cap Set At: {cap:.0f} pkts/sec]")
-    print(f"{args.baseline_label} Mean: {mean_baseline:.2f} pkts/sec")
-    print(f"IDS Threshold: {threshold:.2f} pkts/sec")
-    print(f"{args.baseline_label} Self-Violation Rate: {fpr_baseline:.2f}%")
-    print(f"{args.test_label} False Positive Rate: {fpr_test:.2f}%")
+    # --- 3. SENSITIVITY TRADE-OFF ANALYSIS ---
+    # Calculate the threshold required to successfully detect 90% of the botnet
+    target_catch_rate = 0.90
+    sens_threshold = df_test["packet_count"].quantile(1.0 - target_catch_rate)
 
-    # 3. Visualization
+    # Evaluate the catastrophic False Positive Rate on normal traffic at this new threshold
+    sens_violations_baseline = len(
+        df_baseline[df_baseline["packet_count"] > sens_threshold]
+    )
+    sens_fpr_baseline = (sens_violations_baseline / len(df_baseline)) * 100
+
+    # --- GENERATE SEPARATE REPORT FILE ---
+    report_path = os.path.join(args.outdir, "ids_simulation_report.txt")
+
+    report_content = f"""==================================================
+IDS ANOMALY SIMULATION & SENSITIVITY REPORT
+==================================================
+
+[1] BASELINE STATISTICS ({args.baseline_label})
+--------------------------------------------------
+Total Seconds Evaluated : {len(df_baseline):,}
+Outlier Cap Applied     : {cap:,.0f} pkts/s (99.5th Percentile)
+Mean Volume             : {mean_baseline:,.2f} pkts/s
+Standard Deviation      : {std_baseline:,.2f} pkts/s
+
+[2] DEFAULT CONFIGURATION DEGRADATION
+--------------------------------------------------
+Formula                 : Mean + (3 * StdDev)
+Standard Threshold      : {std_threshold:,.0f} pkts/s
+
+- Baseline False Positives : {std_fpr_baseline:.2f}% (Normal traffic flagged)
+- Botnet Detection Rate    : {std_detection_rate:.2f}% (Attacks caught)
+- Botnet Evasion Rate      : {std_evasion_rate:.2f}% (Attacks undetected)
+
+[3] HIGH SENSITIVITY TUNING TRADE-OFF
+--------------------------------------------------
+Goal: Lower the threshold to catch 90% of {args.test_label}.
+Required Threshold      : {sens_threshold:,.0f} pkts/s
+
+- New Detection Rate       : 90.00%
+- NEW FALSE POSITIVE RATE  : {sens_fpr_baseline:.2f}% (Normal traffic flagged)
+
+==================================================
+CONCLUSION:
+The IDS is fundamentally incapable of separating the datasets.
+At standard configurations, {std_evasion_rate:.2f}% of the botnet evades detection.
+Tuning the IDS to catch the botnet requires lowering the threshold to
+{sens_threshold:,.0f} pkts/s, which results in a massive {sens_fpr_baseline:.2f}% False
+Positive Rate, rendering the system unusable due to alert fatigue.
+==================================================
+"""
+
+    # Print to terminal
+    print(report_content)
+
+    # Save to file
+    with open(report_path, "w") as f:
+        f.write(report_content)
+    print(f"[+] Detailed text report saved to {report_path}")
+
+    # --- 4. Visualization ---
     fig, ax = plt.subplots(figsize=(16, 8))
 
-    # Plot the full, raw distributions of both datasets so reality is not hidden
+    # Plot the full, raw distributions
     ax.hist(
         df_baseline["packet_count"],
         bins=50,
@@ -118,13 +174,32 @@ def main():
         label=args.test_label,
     )
 
-    # Draw the rigid IDS Threshold line
+    # Draw the Standard IDS Threshold line
     ax.axvline(
-        threshold,
+        std_threshold,
         color="black",
         linestyle="--",
         linewidth=3,
-        label=f"IDS Threshold\n({threshold:.0f} pkts/s)",
+        label=f"Standard Threshold ({std_threshold:,.0f} pkts/s)",
+    )
+
+    # Draw the High Sensitivity Threshold line
+    ax.axvline(
+        sens_threshold,
+        color="#D9534F",  # A distinct, warning-red color
+        linestyle=":",
+        linewidth=4,
+        label=f"High Sensitivity Tuning ({sens_threshold:,.0f} pkts/s)",
+    )
+
+    # Highlight the "False Positive Flood Zone"
+    # This shades the area above the sensitive threshold where normal blue traffic gets flagged
+    ax.axvspan(
+        sens_threshold,
+        df_baseline["packet_count"].max(),
+        color="#4C72B0",
+        alpha=0.15,
+        label=f"False Positive Flood ({sens_fpr_baseline:.1f}% Alert Rate)",
     )
 
     ax.set_xlabel("Packets per Second", labelpad=20, fontweight="bold")
@@ -138,13 +213,13 @@ def main():
     ax.legend(
         loc="lower center",
         bbox_to_anchor=(0.5, 1.05),
-        ncol=3,
+        ncol=2,
         framealpha=0.9,
         edgecolor="black",
     )
 
     plt.tight_layout()
-    out_png = f"{args.outdir}/ids_degradation.png"
+    out_png = os.path.join(args.outdir, "ids_degradation.png")
     plt.savefig(out_png, dpi=300, bbox_inches="tight")
     print(f"[+] Visualization saved to {out_png}")
 

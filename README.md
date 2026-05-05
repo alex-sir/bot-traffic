@@ -246,7 +246,7 @@ python3 6_ids_timeseries.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "Baseline Traffi
 **Topic: Anomaly-Based IDS Simulation**
 Compares a test traffic timeline against a strict IDS baseline established by
 historical traffic, proving the degradation of standard thresholding.
-**Outputs:** `ids_degradation.png`
+**Outputs:** `ids_degradation.png`, `ids_simulation_report.txt`
 
 ```bash
 python3 7_evaluate_ids.py -b <baseline_csv> -t <test_csv> -o <output_dir> --baseline-label "Baseline Traffic" --test-label "Test Traffic"
@@ -298,6 +298,7 @@ tail -f yearly_analysis.log
 | `ics_top_deltas.csv`              | Script 5    | Raw CSV data backing the top delta dumbbell plot                  |
 | `<label>_ids_timeseries_1sec.csv` | Script 6    | Raw CSV time-series data for both datasets for IDS simulation     |
 | `ids_degradation.png`             | Script 7    | Cross-Year IDS anomaly simulation results and threshold chart     |
+| `ids_simulation_report.txt`       | Script 7    | IDS anomaly simulation sensitivity report                         |
 
 ---
 

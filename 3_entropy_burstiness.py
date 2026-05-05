@@ -45,6 +45,10 @@ plt.rcParams.update(
     }
 )
 
+# STATIC BINS: Pre-define the logarithmic bins spanning 1 microsecond (0.001 ms) to ~2.7 hours (10^7 ms).
+# This allows us to accumulate counts on the fly without storing millions of raw data points.
+BINS = np.logspace(-3, 7, 60)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Cross-Year Entropy & Burstiness")
@@ -102,14 +106,14 @@ def calc_entropy(counter):
 def extract_data(pcap_list, max_packets):
     src_ips, dst_ports = Counter(), Counter()
 
-    # Chunking list for NumPy arrays
-    all_iats_chunks = []
+    # Create a zeroed array to hold the histogram counts
+    hist_counts = np.zeros(len(BINS) - 1, dtype=np.int64)
 
     for pcap_file in pcap_list:
         print(f"[*] Parsing {os.path.basename(pcap_file)}...")
         packets_this_file = 0
 
-        # Use a raw C-type double array to practically eliminate object overhead
+        # Use a raw C-type double array to eliminate object overhead for the current file
         file_timestamps = array.array("d")
 
         try:
@@ -142,19 +146,18 @@ def extract_data(pcap_list, max_packets):
                 ts_arr = np.array(file_timestamps, dtype=np.float64)
                 ts_arr.sort()
 
-                # Append only the final calculated diffs, instantly freeing the large array memory
-                all_iats_chunks.append(np.diff(ts_arr))
+                # Calculate diffs and convert to milliseconds
+                iats_ms = np.diff(ts_arr) * 1000.0
+
+                # Drop the raw data into the pre-calculated bins immediately
+                counts, _ = np.histogram(iats_ms, bins=BINS)
+                hist_counts += counts
 
         except Exception as e:
             print(f"[-] Error parsing {pcap_file}: {e}")
 
-    # Concatenate all the memory-efficient chunks at the very end
-    if all_iats_chunks:
-        iats = np.concatenate(all_iats_chunks)
-    else:
-        iats = np.array([])
-
-    return calc_entropy(src_ips), calc_entropy(dst_ports), iats
+    # Return the aggregated counts instead of the raw IAT arrays
+    return calc_entropy(src_ips), calc_entropy(dst_ports), hist_counts
 
 
 def main():
@@ -164,10 +167,10 @@ def main():
     out_burst = os.path.join(args.outdir, "burstiness.png")
 
     print(f"--- Extracting {args.label1} ---")
-    ip_ent1, port_ent1, iats1 = extract_data(args.pcap1, args.max_packets)
+    ip_ent1, port_ent1, hist_counts1 = extract_data(args.pcap1, args.max_packets)
 
     print(f"--- Extracting {args.label2} ---")
-    ip_ent2, port_ent2, iats2 = extract_data(args.pcap2, args.max_packets)
+    ip_ent2, port_ent2, hist_counts2 = extract_data(args.pcap2, args.max_packets)
 
     # --- GRAPH 1: Grouped Entropy Bar Chart ---
     fig1, ax1 = plt.subplots(figsize=(10, 8))
@@ -246,26 +249,21 @@ def main():
     # --- GRAPH 2: Overlaid Burstiness Histogram ---
     fig2, ax2 = plt.subplots(figsize=(14, 8))
 
-    iats_ms1 = iats1 * 1000
-    iats_ms2 = iats2 * 1000
-
-    # Create unified logarithmic bins spanning the range of both datasets
-    min_val = max(0.001, min(np.min(iats_ms1), np.min(iats_ms2)))
-    max_val = max(np.max(iats_ms1), np.max(iats_ms2))
-    bins = np.logspace(np.log10(min_val), np.log10(max_val), 60)
-
-    # Overlay distributions (alpha=0.6 makes the overlap visually explicit)
+    # Plot using the `weights` parameter to feed the pre-calculated counts directly into the histogram.
+    # We use BINS[:-1] as the faux data points so Matplotlib aligns the bins correctly.
     ax2.hist(
-        iats_ms1,
-        bins=bins,
+        BINS[:-1],
+        bins=BINS,
+        weights=hist_counts1,
         color="#4C72B0",
         edgecolor="black",
         alpha=0.6,
         label=args.label1,
     )
     ax2.hist(
-        iats_ms2,
-        bins=bins,
+        BINS[:-1],
+        bins=BINS,
+        weights=hist_counts2,
         color="#C44E52",
         edgecolor="black",
         alpha=0.6,
