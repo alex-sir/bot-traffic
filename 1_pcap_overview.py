@@ -114,6 +114,7 @@ def extract_stats(pcap_list, max_packets):
     """Encapsulated extraction function to process a list of files into metrics."""
     total_packets, total_bytes, ics_packets = 0, 0, 0
     protocols, src_ips, dst_ips, dst_ports = Counter(), Counter(), Counter(), Counter()
+    ics_protocols = Counter()
     active_duration_sec = 0
     t_start = None
 
@@ -174,6 +175,7 @@ def extract_stats(pcap_list, max_packets):
 
                         if port and port in ICS_PORTS:
                             ics_packets += 1
+                            ics_protocols[ICS_PORTS[port]] += 1
                     else:
                         protocols["Non-IP"] += 1
 
@@ -197,7 +199,9 @@ def extract_stats(pcap_list, max_packets):
     volume_mb = total_bytes / (1024 * 1024)
     bandwidth_mbps = (total_bytes * 8 / 1_000_000) / active_duration_sec
     pkt_rate = total_packets / active_duration_sec
-    dominant_proto = protocols.most_common(1)[0][0] if protocols else "N/A"
+
+    # Calculate the dominant ICS protocol
+    dominant_ics_proto = ics_protocols.most_common(1)[0][0] if ics_protocols else "N/A"
 
     ics_percentage = (ics_packets / total_packets) * 100 if total_packets > 0 else 0
     non_ics_packets = total_packets - ics_packets
@@ -213,7 +217,7 @@ def extract_stats(pcap_list, max_packets):
         "Total Volume": f"{volume_mb:.2f} MB",
         "Avg Packet Rate": f"{pkt_rate:.1f} pkts/s",
         "Avg Bandwidth": f"{bandwidth_mbps:.3f} Mbps",
-        "Dominant Protocol": f"{dominant_proto}",
+        "Dominant ICS Protocol": f"{dominant_ics_proto}",
         "ICS Traffic": f"{ics_percentage:.4f}% ({ics_packets:,})",
         "Non-ICS Traffic": f"{non_ics_percentage:.4f}% ({non_ics_packets:,})",
         "Unique Src IPs": f"{len(src_ips):,}",
