@@ -125,7 +125,8 @@ def extract_data(pcap_list, max_packets):
                         break
 
                     # Ignore corrupt epoch 0 timestamps (1970)
-                    if ts < 946684800 or ts > 2000000000:
+                    # 946684800 is Jan 1, 2000. This blocks 1970 packets while allowing any modern PCAP.
+                    if ts < 946684800:
                         continue
 
                     packets_this_file += 1
