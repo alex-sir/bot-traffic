@@ -1,0 +1,36 @@
+==================================================
+IDS ANOMALY SIMULATION & SENSITIVITY REPORT
+==================================================
+
+[1] BASELINE STATISTICS (2021 Baseline)
+--------------------------------------------------
+Total Seconds Evaluated : 2,574
+Outlier Cap Applied     : 63,385 pkts/s (99.5th Percentile)
+Mean Volume             : 37,145.84 pkts/s
+Standard Deviation      : 6,652.18 pkts/s
+
+[2] DEFAULT CONFIGURATION DEGRADATION
+--------------------------------------------------
+Formula                 : Mean + (3 * StdDev)
+Standard Threshold      : 57,102 pkts/s
+
+- Baseline False Positives : 0.62% (Normal traffic flagged)
+- Botnet Detection Rate    : 2.53% (Attacks caught)
+- Botnet Evasion Rate      : 97.47% (Attacks undetected)
+
+[3] HIGH SENSITIVITY TUNING TRADE-OFF
+--------------------------------------------------
+Goal: Lower the threshold to catch 90% of 2025 Bot Traffic.
+Required Threshold      : 34,928 pkts/s
+
+- New Detection Rate       : 90.00%
+- NEW FALSE POSITIVE RATE  : 68.10% (Normal traffic flagged)
+
+==================================================
+CONCLUSION:
+The IDS is fundamentally incapable of separating the datasets.
+At standard configurations, 97.47% of the botnet evades detection.
+Tuning the IDS to catch the botnet requires lowering the threshold to
+34,928 pkts/s, which results in a massive 68.10% False
+Positive Rate, rendering the system unusable due to alert fatigue.
+==================================================

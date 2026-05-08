@@ -315,8 +315,22 @@ tail -f yearly_analysis.log
 The bash script `run_analysis.sh` runs Python scripts 1-7 simultaneously on both datasets in
 this order.
 
+## Results
+
+To allow researchers to review our findings without needing to download or process
+the massive raw PCAP files from the Merit Network Telescope, we have included
+the final aggregated artifacts from our 192-million packet longitudinal study
+(2021 vs. 2025) in the `2021_vs_2025_Yearly_Sample` directory.
+
+This directory contains the sanitized, high-resolution outputs of our analysis pipeline,
+including:
+
+- **Visualizations (**`.png`**)**: Charts demonstrating the doubling of ICS port targeting, geographic shifts, burstiness (artificial pacing), and the failure of static IDS volumetric thresholds.
+
+- **Data (**`.csv`**)**: Raw time-series and volume shift data backing our dumbbell plots and IDS simulations.
+
+- **Reports (**`.txt`**)**: The final anomaly-based IDS simulation report detailing the 97.47% evasion rate of modern botnet traffic.
+
 ## Contributors
 
 - Alex Carbajal ([alex-sir](https://github.com/alex-sir))
-- Jonahtan Vasquez ([JonahtanV](https://github.com/JonahtanV))
-- Caleb Faultersack ([MrZergon](https://github.com/MrZergon))
