@@ -14,6 +14,10 @@ As botnets adopt advanced evasive scanning techniques, such as randomized destin
 6. **IDS Time-Series Extraction**: Generates binned 1-second packet count timelines for simulation.
 7. **IDS Evaluation & Sensitivity Simulation**: Simulates a volumetric anomaly-based IDS threshold, showing how modern botnets evade standard configurations and demonstrating the trade-offs when tuning the system for higher detection sensitivity.
 
+Here is the system architecture for the darknet traffic analysis pipeline:
+
+![System Architecture for Darknet Traffic Analysis Pipeline](assets/system_architecture.png)
+
 Ultimately, these tools help researchers and security teams identify patterns of advanced automated scanners and evaluate the resilience of their anomaly detection systems against modern bot traffic.
 
 ## Development Setup
