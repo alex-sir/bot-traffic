@@ -29,6 +29,10 @@ import pandas as pd
 
 
 def parse_args():
+    """
+    Parses command-line arguments to specify dataset paths, labels,
+    output directory, and packet processing limits.
+    """
     parser = argparse.ArgumentParser(description="Cross-Year IDS Time-Series Extractor")
     parser.add_argument(
         "-p1", "--pcap1", nargs="+", required=True, help="Paths to Dataset 1 PCAPs"
@@ -50,8 +54,13 @@ def parse_args():
 
 
 def open_pcap(file_path):
+    """
+    Opens a PCAP file, checking its magic bytes to determine if it is gzipped.
+    Returns a gzip-opened stream or a standard file stream accordingly.
+    """
     with open(file_path, "rb") as f:
         magic = f.read(2)
+    # Magic bytes b"\x1f\x8b" indicate a Gzip compressed file
     return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
 
 
@@ -66,6 +75,7 @@ def extract_timeseries(pcap_list, max_packets, label, outdir):
     traffic_timeline = defaultdict(int)
     sorted_pcaps = sorted(pcap_list)
 
+    # Process each PCAP file to bin packet timestamps
     for pcap_file in sorted_pcaps:
         packets_this_file = 0
         try:
@@ -82,7 +92,7 @@ def extract_timeseries(pcap_list, max_packets, label, outdir):
 
                     packets_this_file += 1
 
-                    # Truncate the timestamp to the nearest whole second
+                    # Truncate the timestamp to the nearest whole second (1-second bins)
                     sec_bin = int(ts)
                     traffic_timeline[sec_bin] += 1
         except Exception as e:
@@ -102,17 +112,21 @@ def extract_timeseries(pcap_list, max_packets, label, outdir):
     safe_label = label.replace(" ", "_").lower()
     out_csv = os.path.join(outdir, f"{safe_label}_ids_timeseries_1sec.csv")
 
+    # Serialize dataframe to CSV
     df.to_csv(out_csv, index=False)
     print(f"[+] Time-series data saved to {out_csv}")
 
 
 def main():
+    # Parse CLI arguments and establish the output path
     args = parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
+    # Extract time-series for Dataset 1
     print(f"--- Processing {args.label1} ---")
     extract_timeseries(args.pcap1, args.max_packets, args.label1, args.outdir)
 
+    # Extract time-series for Dataset 2
     print(f"\n--- Processing {args.label2} ---")
     extract_timeseries(args.pcap2, args.max_packets, args.label2, args.outdir)
 

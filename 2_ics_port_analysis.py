@@ -30,10 +30,12 @@ from collections import Counter, defaultdict
 import numpy as np
 import matplotlib
 
+# Use 'Agg' non-interactive backend for matplotlib so it runs headlessly
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # --- STANDARDIZED FONT CONFIGURATION ---
+# Sets consistent styling across all generated charts and visualizations
 plt.rcParams.update(
     {
         "font.size": 22,
@@ -46,6 +48,8 @@ plt.rcParams.update(
     }
 )
 
+# A mapping of well-known Industrial Control System (ICS) and IIoT destination ports
+# to their respective protocol names for categorization.
 ICS_PORTS = {
     502: "Modbus",
     20000: "DNP3",
@@ -68,6 +72,10 @@ ICS_PORTS = {
 
 
 def parse_args():
+    """
+    Parses command-line arguments to specify dataset paths, labels,
+    output directory, and packet processing limits.
+    """
     parser = argparse.ArgumentParser(description="Cross-Year ICS Port Analysis")
     parser.add_argument(
         "-p1", "--pcap1", nargs="+", required=True, help="Paths to Dataset 1 PCAPs"
@@ -89,21 +97,34 @@ def parse_args():
 
 
 def open_pcap(file_path):
+    """
+    Opens a PCAP file, checking its magic bytes to determine if it is gzipped.
+    Returns a gzip-opened stream or a standard file stream accordingly.
+    """
     with open(file_path, "rb") as f:
         magic = f.read(2)
+    # Magic bytes b"\x1f\x8b" indicate a Gzip compressed file
     return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
 
 
 def get_ipv4_packet(buf, datalink):
+    """
+    Extracts and returns the IPv4 packet payload from the raw frame buffer
+    based on the link-layer encapsulation type (datalink).
+    Returns None if the frame does not contain a valid IPv4 packet.
+    """
     try:
+        # Standard Ethernet encapsulation
         if datalink == dpkt.pcap.DLT_EN10MB:
             eth = dpkt.ethernet.Ethernet(buf)
             if isinstance(eth.data, dpkt.ip.IP):
                 return eth.data
+        # Linux cooked capture encapsulation
         elif datalink == dpkt.pcap.DLT_LINUX_SLL:
             sll = dpkt.sll.SLL(buf)
             if isinstance(sll.data, dpkt.ip.IP):
                 return sll.data
+        # Raw IP encapsulations (various link-type values for raw IPv4)
         elif datalink in (12, 14, 101, 228):
             ip = dpkt.ip.IP(buf)
             if ip.v == 4:
@@ -126,12 +147,14 @@ def extract_ics_data(pcap_list, max_packets):
     dst_ips_per_port = defaultdict(set)
     total_packets_parsed = 0
 
+    # Iterate over each PCAP file
     for pcap_file in pcap_list:
         packets_this_file = 0
         try:
             with open_pcap(pcap_file) as f:
                 pcap = dpkt.pcap.Reader(f)
                 datalink = pcap.datalink()
+                # Iterate over packets (timestamp and packet buffer) in the PCAP
                 for ts, buf in pcap:
                     if packets_this_file >= max_packets:
                         break
@@ -144,11 +167,13 @@ def extract_ics_data(pcap_list, max_packets):
                     packets_this_file += 1
                     total_packets_parsed += 1
 
+                    # Parse IPv4 packet
                     ip = get_ipv4_packet(buf, datalink)
                     if not ip:
                         continue
 
                     port = None
+                    # TCP and UDP check
                     if ip.p in (6, 17):
                         try:
                             port = ip.data.dport
@@ -164,6 +189,7 @@ def extract_ics_data(pcap_list, max_packets):
             print(f"[-] Error parsing {pcap_file}: {e}")
 
     # --- DYNAMIC THRESHOLD CALCULATION ---
+    # Dynamically generates a scan threshold based on the total packets parsed
     dynamic_threshold = max(5, total_packets_parsed / 50000)
 
     # Calculate Scanning Patterns (Sequential vs. Random)
@@ -173,7 +199,7 @@ def extract_ics_data(pcap_list, max_packets):
             patterns[proto] = ""
             continue
         try:
-            # The ips variable is already a set of unique values, so we just convert directly
+            # Convert raw IP bytes to integers and sort them
             int_ips = sorted(struct.unpack("!I", ip_bytes)[0] for ip_bytes in ips)
 
             # Calculate the numeric distance between each sequentially targeted IP
@@ -183,7 +209,7 @@ def extract_ics_data(pcap_list, max_packets):
             # Compare against the dynamically generated threshold
             pat_type = "Seq" if avg_gap <= dynamic_threshold else "Rnd"
 
-            # Format the output string
+            # Format the output string with pattern and average gap size
             patterns[proto] = f"{pat_type} (Gap: {avg_gap:.1f})"
         except Exception:
             patterns[proto] = ""
@@ -192,12 +218,15 @@ def extract_ics_data(pcap_list, max_packets):
 
 
 def main():
+    # Parse CLI arguments and establish the output path
     args = parse_args()
     os.makedirs(args.outdir, exist_ok=True)
     out_file = os.path.join(args.outdir, "ics_ports.png")
 
+    # Extract metrics for Dataset 1
     print(f"--- Extracting {args.label1} ---")
     hits1, pat1 = extract_ics_data(args.pcap1, args.max_packets)
+    # Extract metrics for Dataset 2
     print(f"--- Extracting {args.label2} ---")
     hits2, pat2 = extract_ics_data(args.pcap2, args.max_packets)
 
@@ -221,6 +250,7 @@ def main():
     patterns2 = [pat2.get(p, "") for p in sorted_protos]
 
     # --- Visualization ---
+    # Setup the matplotlib plot layout
     fig, ax = plt.subplots(figsize=(18, 16))
     group_spacing = 3.0
     y = np.arange(len(sorted_protos)) * group_spacing
@@ -263,7 +293,7 @@ def main():
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    # Annotate bars with the pattern text firmly outside to the right
+    # Annotate bars with the pattern text firmly outside to the right for dataset 1
     for i, bar in enumerate(bars1):
         width = bar.get_width()
         if width > 0 and patterns1[i]:
@@ -277,6 +307,7 @@ def main():
                 color="black",
             )
 
+    # Annotate bars with the pattern text firmly outside to the right for dataset 2
     for i, bar in enumerate(bars2):
         width = bar.get_width()
         if width > 0 and patterns2[i]:
@@ -290,6 +321,7 @@ def main():
                 color="black",
             )
 
+    # Render custom legend location
     ax.legend(
         loc="lower center",
         bbox_to_anchor=(0.5, 1),

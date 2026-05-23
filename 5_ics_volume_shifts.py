@@ -30,10 +30,12 @@ from collections import Counter
 import pandas as pd
 import matplotlib
 
+# Use 'Agg' non-interactive backend for matplotlib so it runs headlessly
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # --- STANDARDIZED FONT CONFIGURATION ---
+# Sets consistent styling across all generated charts and visualizations
 plt.rcParams.update(
     {
         "font.size": 22,
@@ -46,8 +48,11 @@ plt.rcParams.update(
     }
 )
 
+# Limit comparison to the Top N ICS ports by volume change size
 TOP_N = 15
 
+# A mapping of well-known Industrial Control System (ICS) and IIoT destination ports
+# to their respective protocol names for categorization.
 ICS_PORTS = {
     502: "Modbus",
     20000: "DNP3",
@@ -70,6 +75,10 @@ ICS_PORTS = {
 
 
 def parse_args():
+    """
+    Parses command-line arguments to specify dataset paths, labels,
+    output directory, and packet processing limits.
+    """
     parser = argparse.ArgumentParser(description="Cross-Year Top Delta Dumbbell Plot")
     parser.add_argument(
         "-p1", "--pcap1", nargs="+", required=True, help="Dataset 1 PCAPs"
@@ -91,21 +100,34 @@ def parse_args():
 
 
 def open_pcap(file_path):
+    """
+    Opens a PCAP file, checking its magic bytes to determine if it is gzipped.
+    Returns a gzip-opened stream or a standard file stream accordingly.
+    """
     with open(file_path, "rb") as f:
         magic = f.read(2)
+    # Magic bytes b"\x1f\x8b" indicate a Gzip compressed file
     return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
 
 
 def get_ipv4_packet(buf, datalink):
+    """
+    Extracts and returns the IPv4 packet payload from the raw frame buffer
+    based on the link-layer encapsulation type (datalink).
+    Returns None if the frame does not contain a valid IPv4 packet.
+    """
     try:
+        # Standard Ethernet encapsulation
         if datalink == dpkt.pcap.DLT_EN10MB:
             eth = dpkt.ethernet.Ethernet(buf)
             if isinstance(eth.data, dpkt.ip.IP):
                 return eth.data
+        # Linux cooked capture encapsulation
         elif datalink == dpkt.pcap.DLT_LINUX_SLL:
             sll = dpkt.sll.SLL(buf)
             if isinstance(sll.data, dpkt.ip.IP):
                 return sll.data
+        # Raw IP encapsulations (various link-type values for raw IPv4)
         elif datalink in (12, 14, 101, 228):
             ip = dpkt.ip.IP(buf)
             if ip.v == 4:
@@ -116,7 +138,9 @@ def get_ipv4_packet(buf, datalink):
 
 
 def extract_port_volumes(pcap_list, max_packets):
-    # Parse PCAPs and aggregate the total hit count per ICS port.
+    """
+    Parses PCAPs and aggregates the total hit count per ICS port.
+    """
     port_counts = Counter()
 
     for pcap_file in sorted(pcap_list):
@@ -127,6 +151,7 @@ def extract_port_volumes(pcap_list, max_packets):
             with open_pcap(pcap_file) as f:
                 pcap = dpkt.pcap.Reader(f)
                 datalink = pcap.datalink()
+                # Iterate over packets in the PCAP
                 for ts, buf in pcap:
                     if packets_this_file >= max_packets:
                         break
@@ -137,12 +162,14 @@ def extract_port_volumes(pcap_list, max_packets):
                         continue
 
                     port = None
+                    # TCP and UDP check
                     if ip.p in (6, 17):
                         try:
                             port = ip.data.dport
                         except:
                             pass
 
+                    # If port is in known ICS ports, increment counter
                     if port and port in ICS_PORTS:
                         port_counts[port] += 1
 
@@ -153,6 +180,7 @@ def extract_port_volumes(pcap_list, max_packets):
 
 
 def main():
+    # Parse CLI arguments and establish the output path
     args = parse_args()
     os.makedirs(args.outdir, exist_ok=True)
     out_png = os.path.join(args.outdir, "ics_top_deltas.png")
@@ -160,13 +188,16 @@ def main():
 
     port_keys = list(ICS_PORTS.keys())
 
+    # Extract metrics for Dataset 1
     print(f"--- Extracting {args.label1} ---")
     counts1 = extract_port_volumes(args.pcap1, args.max_packets)
 
+    # Extract metrics for Dataset 2
     print(f"--- Extracting {args.label2} ---")
     counts2 = extract_port_volumes(args.pcap2, args.max_packets)
 
     # --- PHASE 2: Delta Calculation & Filtering ---
+    # Compute absolute differences for sorting
     port_stats = []
     for p in port_keys:
         v1 = counts1.get(p, 0)
@@ -196,7 +227,7 @@ def main():
         print("[-] No ICS traffic changes detected to chart.")
         return
 
-    # Extract data for plotting
+    # Extract sorted fields for plotting
     labels = [stat["label"] for stat in top_stats]
     vals1 = [stat["v1"] for stat in top_stats]
     vals2 = [stat["v2"] for stat in top_stats]
@@ -204,6 +235,7 @@ def main():
     y_positions = range(len(labels))
 
     # --- PHASE 3: Visualization ---
+    # Setup subplots for dumbbell plot layout
     fig, ax = plt.subplots(figsize=(16, 15))
 
     # Add extra padding to the top and bottom of the Y-axis so the text doesn't get clipped
@@ -248,6 +280,7 @@ def main():
         text_str = f"+{delta_val:,}" if delta_val > 0 else f"{delta_val:,}"
         color = "#B33939" if delta_val > 0 else "#218C74"
 
+        # Position text at the center of the line segment
         mid_x = (vals1[i] + vals2[i]) / 2
 
         ax.text(
@@ -285,7 +318,7 @@ def main():
     plt.tight_layout()
     plt.savefig(out_png, dpi=300, bbox_inches="tight")
 
-    # Save to CSV using the formatted labels
+    # Save output to CSV using Pandas
     df = pd.DataFrame(top_stats)
     df.to_csv(out_csv, index=False)
 

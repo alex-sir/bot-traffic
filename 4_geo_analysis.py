@@ -32,9 +32,11 @@ import dpkt
 from collections import Counter
 import matplotlib
 
+# Use 'Agg' non-interactive backend for matplotlib so it runs headlessly
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+# Verify that the maxminddb library is installed
 try:
     import maxminddb
 except ImportError:
@@ -42,6 +44,7 @@ except ImportError:
     sys.exit(1)
 
 # --- STANDARDIZED FONT CONFIGURATION ---
+# Sets consistent styling across all generated charts and visualizations
 plt.rcParams.update(
     {
         "font.size": 22,
@@ -54,6 +57,7 @@ plt.rcParams.update(
     }
 )
 
+# Limit comparison to the Top N source countries by volume
 TOP_N = 15
 
 # --- NORMALIZATION DICTIONARY ---
@@ -75,6 +79,10 @@ COUNTRY_NORMALIZATION = {
 
 
 def parse_args():
+    """
+    Parses command-line arguments to specify dataset paths, MaxMind database files,
+    labels, output directory, and packet processing limits.
+    """
     parser = argparse.ArgumentParser(description="Cross-Year GeoIP Analysis")
     parser.add_argument(
         "-p1", "--pcap1", nargs="+", required=True, help="Paths to Dataset 1 PCAPs"
@@ -102,21 +110,34 @@ def parse_args():
 
 
 def open_pcap(file_path):
+    """
+    Opens a PCAP file, checking its magic bytes to determine if it is gzipped.
+    Returns a gzip-opened stream or a standard file stream accordingly.
+    """
     with open(file_path, "rb") as f:
         magic = f.read(2)
+    # Magic bytes b"\x1f\x8b" indicate a Gzip compressed file
     return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
 
 
 def get_ipv4_packet(buf, datalink):
+    """
+    Extracts and returns the IPv4 packet payload from the raw frame buffer
+    based on the link-layer encapsulation type (datalink).
+    Returns None if the frame does not contain a valid IPv4 packet.
+    """
     try:
+        # Standard Ethernet encapsulation
         if datalink == dpkt.pcap.DLT_EN10MB:
             eth = dpkt.ethernet.Ethernet(buf)
             if isinstance(eth.data, dpkt.ip.IP):
                 return eth.data
+        # Linux cooked capture encapsulation
         elif datalink == dpkt.pcap.DLT_LINUX_SLL:
             sll = dpkt.sll.SLL(buf)
             if isinstance(sll.data, dpkt.ip.IP):
                 return sll.data
+        # Raw IP encapsulations (various link-type values for raw IPv4)
         elif datalink in (12, 14, 101, 228):
             ip = dpkt.ip.IP(buf)
             if ip.v == 4:
@@ -127,6 +148,11 @@ def get_ipv4_packet(buf, datalink):
 
 
 def lookup_country(reader, ip):
+    """
+    Queries the MaxMind database reader with a string IP.
+    Returns the mapped English country name or applies normalization mappings.
+    Returns 'Unknown' if query fails or is missing.
+    """
     try:
         res = reader.get(ip)
         country = "Unknown"
@@ -135,7 +161,7 @@ def lookup_country(reader, ip):
         elif res and "registered_country" in res:
             country = res["registered_country"].get("names", {}).get("en", "Unknown")
 
-        # Apply normalization to fix MaxMind DB version inconsistencies
+        # Apply normalization to fix MaxMind DB version name inconsistencies
         return COUNTRY_NORMALIZATION.get(country, country)
     except Exception:
         pass
@@ -143,9 +169,13 @@ def lookup_country(reader, ip):
 
 
 def extract_geo(pcap_list, mmdb_path, max_packets):
+    """
+    Aggregates source IP addresses from PCAPs, resolves them via
+    MaxMind DB database lookups, and returns country packet counts.
+    """
     ip_packet_counts = Counter()
 
-    # Pre-Aggregate IPs
+    # Pre-Aggregate IPs to minimize MaxMind DB queries
     for pcap_file in pcap_list:
         print(f"[*] Parsing {os.path.basename(pcap_file)}...")
         packets_this_file = 0
@@ -153,6 +183,7 @@ def extract_geo(pcap_list, mmdb_path, max_packets):
             with open_pcap(pcap_file) as f:
                 pcap = dpkt.pcap.Reader(f)
                 datalink = pcap.datalink()
+                # Iterate over packets in the PCAP
                 for ts, buf in pcap:
                     if packets_this_file >= max_packets:
                         break
@@ -163,7 +194,7 @@ def extract_geo(pcap_list, mmdb_path, max_packets):
         except Exception as e:
             print(f"[-] Error reading {pcap_file}: {e}")
 
-    # Database Lookup
+    # Database Lookup mapping IP counts to resolved countries
     reader = maxminddb.open_database(mmdb_path)
     country_pkt = Counter()
     for src_bytes, count in ip_packet_counts.items():
@@ -176,12 +207,16 @@ def extract_geo(pcap_list, mmdb_path, max_packets):
 
 
 def main():
+    # Parse CLI arguments and establish the output path
     args = parse_args()
     os.makedirs(args.outdir, exist_ok=True)
     out_png = os.path.join(args.outdir, "geo_analysis.png")
 
+    # Extract metrics for Dataset 1
     print(f"--- Extracting {args.label1} ---")
     geo1 = extract_geo(args.pcap1, args.mmdb1, args.max_packets)
+
+    # Extract metrics for Dataset 2
     print(f"--- Extracting {args.label2} ---")
     geo2 = extract_geo(args.pcap2, args.mmdb2, args.max_packets)
 
@@ -190,15 +225,16 @@ def main():
     combined_geo.update(geo1)
     combined_geo.update(geo2)
 
+    # Exclude 'Unknown' from ranking
     top_countries = [c[0] for c in combined_geo.most_common(TOP_N) if c[0] != "Unknown"]
 
-    # Build Table Matrix
+    # Build Table Matrix with delta statistics
     table_data = []
     for c in top_countries:
         v1 = geo1.get(c, 0)
         v2 = geo2.get(c, 0)
 
-        # Protect against ZeroDivisionError
+        # Protect against ZeroDivisionError and compute percentage change
         if v1 > 0:
             delta = ((v2 - v1) / v1) * 100
             delta_str = f"+{delta:.1f}%" if delta > 0 else f"{delta:.1f}%"
@@ -227,7 +263,7 @@ def main():
     )
     headers = ["Country", header_label1, header_label2, "Δ (%)"]
 
-    # Determine a single, uniform font size for the entire header row
+    # Determine a single, uniform font size for the entire header row based on max string size
     max_header_len = max(len(line) for h in headers for line in h.split("\n"))
     header_size = 22
     if max_header_len > 18:
@@ -235,6 +271,7 @@ def main():
     elif max_header_len > 12:
         header_size = 18
 
+    # Render table on the axis
     table = ax.table(
         cellText=table_data,
         colLabels=headers,
@@ -243,6 +280,7 @@ def main():
         cellLoc="center",
     )
 
+    # Style table text size and scaling
     table.auto_set_font_size(False)
     table.set_fontsize(20)
     table.scale(1.0, 3.0)
@@ -254,17 +292,22 @@ def main():
         # Explicitly increase the padding so the text doesn't touch the borders
         cell.PAD = 0.1
 
+        # Header formatting
         if row == 0:
             # Apply the globally determined header size
             cell.set_text_props(weight="bold", color="white", size=header_size)
 
             if col == 0 or col == 3:
-                cell.set_facecolor("#2B475D")
+                cell.set_facecolor(
+                    "#2B475D"
+                )  # Dark blue-gray for metadata/delta headers
             elif col == 1:
-                cell.set_facecolor("#4C72B0")  # Match Color for Dataset 1
+                cell.set_facecolor("#4C72B0")  # Blue for dataset 1 header
             elif col == 2:
-                cell.set_facecolor("#C44E52")  # Match Color for Dataset 2
+                cell.set_facecolor("#C44E52")  # Red-brown for dataset 2 header
+        # Body cell formatting
         else:
+            # Alternating row background colors
             cell.set_facecolor("#F8F9FA" if row % 2 == 0 else "#FFFFFF")
 
             # Left align country names, center align numbers, explicitly colorize the delta

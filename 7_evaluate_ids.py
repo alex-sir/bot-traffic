@@ -27,10 +27,12 @@ import os
 import pandas as pd
 import matplotlib
 
+# Use 'Agg' non-interactive backend for matplotlib so it runs headlessly
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # --- STANDARDIZED FONT CONFIGURATION ---
+# Sets consistent styling across all generated charts and visualizations
 plt.rcParams.update(
     {
         "font.size": 22,
@@ -45,6 +47,9 @@ plt.rcParams.update(
 
 
 def parse_args():
+    """
+    Parses command-line arguments to specify dataset paths, labels, and output directory.
+    """
     parser = argparse.ArgumentParser(
         description="IDS Evaluation & Sensitivity Simulation"
     )
@@ -65,14 +70,16 @@ def parse_args():
 
 
 def main():
+    # Parse CLI arguments and establish the output path
     args = parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
-    # Load the data
+    # Load the 1-second interval time-series datasets
     df_baseline = pd.read_csv(args.baseline)
     df_test = pd.read_csv(args.test)
 
     # --- PROTECTION AGAINST OUTLIERS ---
+    # Calculates the 99.5th percentile threshold on baseline data and filters out outliers
     cap = df_baseline["packet_count"].quantile(0.995)
     clean_baseline = df_baseline[df_baseline["packet_count"] <= cap]
 
@@ -84,11 +91,13 @@ def main():
     std_threshold = mean_baseline + (3 * std_baseline)
 
     # 2. Evaluate Standard Degradation (Default Configuration)
+    # Counts intervals exceeding standard threshold on baseline to calculate False Positive Rate (FPR)
     std_violations_baseline = len(
         df_baseline[df_baseline["packet_count"] > std_threshold]
     )
     std_fpr_baseline = (std_violations_baseline / len(df_baseline)) * 100
 
+    # Counts intervals exceeding standard threshold on test traffic to calculate Detection and Evasion rates
     std_violations_test = len(df_test[df_test["packet_count"] > std_threshold])
     std_detection_rate = (std_violations_test / len(df_test)) * 100
     std_evasion_rate = 100.0 - std_detection_rate
@@ -105,6 +114,7 @@ def main():
     sens_fpr_baseline = (sens_violations_baseline / len(df_baseline)) * 100
 
     # --- GENERATE SEPARATE REPORT FILE ---
+    # Define text report output path and build report content
     report_path = os.path.join(args.outdir, "ids_simulation_report.txt")
 
     report_content = f"""==================================================
@@ -145,18 +155,19 @@ Positive Rate, rendering the system unusable due to alert fatigue.
 ==================================================
 """
 
-    # Print to terminal
+    # Print report summary to standard output
     print(report_content)
 
-    # Save to file
+    # Save report summary to text file
     with open(report_path, "w") as f:
         f.write(report_content)
     print(f"[+] Detailed text report saved to {report_path}")
 
     # --- 4. Visualization ---
+    # Setup subplots for displaying density distributions and threshold lines
     fig, ax = plt.subplots(figsize=(16, 8))
 
-    # Plot the full, raw distributions
+    # Plot the full, raw distributions as probability density histograms
     ax.hist(
         df_baseline["packet_count"],
         bins=50,
@@ -202,6 +213,7 @@ Positive Rate, rendering the system unusable due to alert fatigue.
         label=f"False Positive Flood ({sens_fpr_baseline:.1f}% Alert Rate)",
     )
 
+    # Configure axes, labels, and ticks
     ax.set_xlabel("Packets per Second", labelpad=20, fontweight="bold")
     ax.set_ylabel("Probability Density", labelpad=20, fontweight="bold")
     ax.grid(axis="y", linestyle="--", alpha=0.7)
@@ -210,6 +222,7 @@ Positive Rate, rendering the system unusable due to alert fatigue.
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
+    # Configure custom legend layout
     ax.legend(
         loc="lower center",
         bbox_to_anchor=(0.5, 1.05),
