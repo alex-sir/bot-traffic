@@ -1,5 +1,21 @@
 # Characterizing AI-Assisted Bot Traffic in Darknet Data: Implications for ICS and IIoT Security
 
+## Project Overview
+
+This project provides an analytical pipeline designed to ingest, process, and characterize darknet traffic datasets, such as packet captures from the Merit Network Telescope, to evaluate the evolution of scanning activity. Specifically, it focuses on analyzing how modern, potentially AI-assisted botnets target Industrial Control System (ICS) and Industrial Internet of Things (IIoT) protocols, comparing historical baseline datasets against modern test datasets (e.g., 2021 versus 2025).
+
+As botnets adopt advanced evasive scanning techniques, such as randomized destination ordering, artificial inter-packet delays, and geographical dispersion, traditional, static threshold-based Intrusion Detection Systems (IDS) degrade in effectiveness. This project automates the extraction and visual comparison of telemetry along key security dimensions to demonstrate these trends:
+
+1. **PCAP Traffic Overview**: Aggregates core statistics (data volume, average packet rate, bandwidth, dominant ICS protocols, and active duration) across compared datasets.
+2. **ICS Port Targeting & Scanning Patterns**: Identifies traffic targeting common industrial ports (e.g., Modbus, DNP3, EtherNet/IP) and calculates whether scanners employ sequential or randomized targeting using a dynamically scaling gap threshold.
+3. **Traffic Entropy & Burstiness**: Calculates Shannon Entropy for source IPs and destination ports to measure scanning diversity, and charts Inter-Arrival Times (IAT) on a log scale to analyze the burstiness (or deliberate pacing) of the traffic.
+4. **Geographic Distribution**: Maps source IP addresses to countries using MaxMind DB files to trace shifting geographical origins and volume deltas.
+5. **Protocol Volume Shifts**: Generates connected dumbbell plots to highlight the top ICS ports experiencing the most drastic volume changes.
+6. **IDS Time-Series Extraction**: Generates binned 1-second packet count timelines for simulation.
+7. **IDS Evaluation & Sensitivity Simulation**: Simulates a volumetric anomaly-based IDS threshold, showing how modern botnets evade standard configurations and demonstrating the trade-offs when tuning the system for higher detection sensitivity.
+
+Ultimately, these tools help researchers and security teams identify patterns of advanced automated scanners and evaluate the resilience of their anomaly detection systems against modern bot traffic.
+
 ## Development Setup
 
 This project utilizes Python scripts and a Python virtual environment.
@@ -330,6 +346,14 @@ including:
 - **Data (**`.csv`**)**: Raw time-series and volume shift data backing our dumbbell plots and IDS simulations.
 
 - **Reports (**`.txt`**)**: The final anomaly-based IDS simulation report detailing the 97.47% evasion rate of modern botnet traffic.
+
+## Research Paper
+
+This work was accepted and presented at IEEE AIIoT 2026. The research paper is
+currently publicly available:
+
+- DOI: <https://arxiv.org/abs/2605.14209>
+- PDF: <https://arxiv.org/pdf/2605.14209>
 
 ## Contributors
 
