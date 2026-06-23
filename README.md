@@ -353,8 +353,11 @@ including:
 
 ## Research Paper
 
-This work was accepted and presented at IEEE AIIoT 2026. The research paper is
-currently publicly available:
+This work was accepted and presented at IEEE AIIoT 2026:
+
+- IEEE Xplore: <https://ieeexplore.ieee.org/document/11569572>
+
+The research paper is currently publicly available on arXiv:
 
 - DOI: <https://arxiv.org/abs/2605.14209>
 - PDF: <https://arxiv.org/pdf/2605.14209>
