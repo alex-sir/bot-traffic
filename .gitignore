@@ -10,4 +10,5 @@ data/
 
 # Output files (.csv, .png, etc)
 output/
+output_ml/
 analysis_results/
