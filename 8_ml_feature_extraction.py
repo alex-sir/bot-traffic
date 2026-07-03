@@ -15,7 +15,7 @@ Usage Instructions:
     Example with custom output directory:
         python3 8_ml_feature_extraction.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
                                            -l1 "2021" -l2 "2025" \
-                                           -o output_ml/ \
+                                           -o output/ \
                                            -n 1000000
 """
 
@@ -53,7 +53,7 @@ def parse_args():
         default="Dataset_2",
         help="Label for Dataset 2 (used for file naming)",
     )
-    parser.add_argument("-o", "--outdir", default="output_ml", help="Output directory")
+    parser.add_argument("-o", "--outdir", default="output", help="Output directory")
     parser.add_argument(
         "-n", "--max-packets", type=int, default=1000000, help="Max packets per file"
     )
