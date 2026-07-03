@@ -272,12 +272,23 @@ historical traffic, proving the degradation of standard thresholding.
 python3 7_evaluate_ids.py -b <baseline_csv> -t <test_csv> -o <output_dir> --baseline-label "Baseline Traffic" --test-label "Test Traffic"
 ```
 
+### Script 8 — `8_ml_feature_extraction.py`
+
+**Topic: ML Feature Extraction**
+Compares a test traffic timeline against a strict IDS baseline established by
+historical traffic, proving the degradation of standard thresholding.
+**Outputs:** `<label1>_autoencoder_features.csv`, `<label1>_isolation_forest_features.csv`, `<label1>_lstm_features.csv`, `<label2>_autoencoder_features.csv`, `<label2>_isolation_forest_features.csv`, `<label2>_lstm_features.csv`
+
+```bash
+python3 8_ml_feature_extraction.py -p1 <pcap_dir1> -p2 <pcap_dir2> -l1 "baseline" -l2 "test" -o <output_dir> -n <max_packets>
+```
+
 ### Bash Script — `run_yearly_analysis.sh`
 
 **NOTE: This script must be run within a Merit VM.**
 
 Iterates through the specified hours of data of the specified days for two different years.
-It runs Python scripts 1-7 on the specified PCAP hours, feeding both datasets simultaneously to generate comparative outputs.
+It runs Python scripts 1-8 on the specified PCAP hours, feeding both datasets simultaneously to generate comparative outputs.
 
 When this script runs, it automatically creates the directory `analysis_results` (if it does not exist) within the project root directory.
 This directory holds the subdirectories containing the comparative results (e.g., `2021_vs_2025_Yearly_Sample`).
@@ -307,18 +318,19 @@ tail -f yearly_analysis.log
 
 ## Output Files Summary
 
-| File                              | Produced by | Description                                                       |
-| --------------------------------- | ----------- | ----------------------------------------------------------------- |
-| `pcap_overview.png`               | Script 1    | Cross-Year core metrics and statistics summary table              |
-| `ics_ports.png`                   | Script 2    | Grouped cross-year ICS port targeting and scanning chart          |
-| `entropy.png`                     | Script 3    | Grouped cross-year Shannon entropy bar chart                      |
-| `burstiness.png`                  | Script 3    | Overlaid cross-year Inter-Arrival Time (IAT) histogram            |
-| `geo_analysis.png`                | Script 4    | Cross-Year geographic shift table tracking volume delta           |
-| `ics_top_deltas.png`              | Script 5    | Connected dot plot (Dumbbell Plot) for top ICS port volume shifts |
-| `ics_top_deltas.csv`              | Script 5    | Raw CSV data backing the top delta dumbbell plot                  |
-| `<label>_ids_timeseries_1sec.csv` | Script 6    | Raw CSV time-series data for both datasets for IDS simulation     |
-| `ids_degradation.png`             | Script 7    | Cross-Year IDS anomaly simulation results and threshold chart     |
-| `ids_simulation_report.txt`       | Script 7    | IDS anomaly simulation sensitivity report                         |
+| File                                 | Produced by | Description                                                       |
+| ------------------------------------ | ----------- | ----------------------------------------------------------------- |
+| `pcap_overview.png`                  | Script 1    | Cross-Year core metrics and statistics summary table              |
+| `ics_ports.png`                      | Script 2    | Grouped cross-year ICS port targeting and scanning chart          |
+| `entropy.png`                        | Script 3    | Grouped cross-year Shannon entropy bar chart                      |
+| `burstiness.png`                     | Script 3    | Overlaid cross-year Inter-Arrival Time (IAT) histogram            |
+| `geo_analysis.png`                   | Script 4    | Cross-Year geographic shift table tracking volume delta           |
+| `ics_top_deltas.png`                 | Script 5    | Connected dot plot (Dumbbell Plot) for top ICS port volume shifts |
+| `ics_top_deltas.csv`                 | Script 5    | Raw CSV data backing the top delta dumbbell plot                  |
+| `<label>_ids_timeseries_1sec.csv`    | Script 6    | Raw CSV time-series data for both datasets for IDS simulation     |
+| `ids_degradation.png`                | Script 7    | Cross-Year IDS anomaly simulation results and threshold chart     |
+| `ids_simulation_report.txt`          | Script 7    | IDS anomaly simulation sensitivity report                         |
+| `<label>_<mlalgorithm>_features.csv` | Script 8    | CSV feature sets for training ML algorithms                       |
 
 ---
 
@@ -331,8 +343,9 @@ tail -f yearly_analysis.log
 5. Script 5 (top ICS volume shifts dumbbell plot)
 6. Script 6 (IDS time-series data)
 7. Script 7 (IDS simulation results)
+8. Script 8 (ML feature extraction)
 
-The bash script `run_analysis.sh` runs Python scripts 1-7 simultaneously on both datasets in
+The bash script `run_analysis.sh` runs Python scripts 1-8 simultaneously on both datasets in
 this order.
 
 ## Results
