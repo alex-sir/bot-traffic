@@ -15,7 +15,7 @@ Usage Instructions:
     Example with custom output directory:
         python3 8_ml_feature_extraction.py -p1 data/2021/*.pcap.gz -p2 data/2025/*.pcap.gz \
                                            -l1 "2021" -l2 "2025" \
-                                           -o output/ \
+                                           -o output_ml/ \
                                            -n 1000000
 """
 
@@ -31,6 +31,7 @@ import dpkt
 def parse_args():
     """
     Parses CLI arguments to support processing two distinct datasets (e.g., baseline vs. test).
+    Allows for configurable packet limits to facilitate rapid testing before full processing.
     """
     parser = argparse.ArgumentParser(
         description="Extract ML features from PCAPs for two datasets"
@@ -53,7 +54,7 @@ def parse_args():
         default="Dataset_2",
         help="Label for Dataset 2 (used for file naming)",
     )
-    parser.add_argument("-o", "--outdir", default="output", help="Output directory")
+    parser.add_argument("-o", "--outdir", default="output_ml", help="Output directory")
     parser.add_argument(
         "-n", "--max-packets", type=int, default=1000000, help="Max packets per file"
     )
@@ -127,6 +128,7 @@ def extract_features(pcap_list, label, outdir, max_packets):
     # --- Header Definitions ---
     # Isolation Forest looks for statistically unusual flows (aggregated connection metrics)
     iso_headers = [
+        "timestamp",
         "src_ip",
         "dst_ip",
         "src_port",
@@ -149,6 +151,9 @@ def extract_features(pcap_list, label, outdir, max_packets):
     # LSTM evaluates time-ordered sequences to detect abnormal pacing/burstiness
     lstm_headers = [
         "timestamp",
+        "src_ip",
+        "dst_port",
+        "proto",
         "inter_arrival_time",
         "frame_len",
         "tcp_time_delta",
@@ -156,14 +161,16 @@ def extract_features(pcap_list, label, outdir, max_packets):
         "tcp_flags_ack",
         "tcp_flags_fin",
         "tcp_flags_rst",
-        "ip_proto",
-        "tcp_dstport",
+        "flow_packet_count",
     ]
 
     # Autoencoder reconstructs numerical vectors per packet; poor reconstruction = anomaly
     # Integrates both packet-level data and flow/host-level context
     ae_headers = [
         "timestamp",
+        "src_ip",
+        "dst_port",
+        "proto",
         "frame_len",
         "ip_len",
         "ip_ttl",
@@ -183,6 +190,7 @@ def extract_features(pcap_list, label, outdir, max_packets):
         "flow_bytes_total",
         "flow_duration",
         "dst_port_entropy",
+        "flow_packet_count",
     ]
 
     with (
@@ -225,9 +233,10 @@ def extract_features(pcap_list, label, outdir, max_packets):
             # to calculate accurate scanning entropy.
             hosts = defaultdict(lambda: {"dst_ports": [], "dst_ips": []})
 
-            # Buffer to hold Autoencoder packet data in memory until the file finishes parsing,
-            # allowing us to append the final calculated flow/host stats to each packet vector.
+            # Buffers to hold sequence/packet data in memory until the file finishes parsing.
+            # This allows us to append the final calculated flow totals (like flow_packet_count) to each packet vector.
             ae_records = []
+            lstm_records = []
 
             # Time tracking variables for inter-arrival calculations
             last_ts = None
@@ -311,23 +320,6 @@ def extract_features(pcap_list, label, outdir, max_packets):
                             except:
                                 pass
 
-                        # --- WRITE: LSTM Record ---
-                        # Because LSTM is a sequence model, records are written immediately chronologically
-                        lstm_writer.writerow(
-                            [
-                                ts,
-                                inter_arrival_time,
-                                frame_len,
-                                tcp_time_delta,
-                                tcp_syn,
-                                tcp_ack,
-                                tcp_fin,
-                                tcp_rst,
-                                ip.p,
-                                dport,
-                            ]
-                        )
-
                         # Generate unique identifiers for dictionary lookups
                         src_ip_str = "%d.%d.%d.%d" % tuple(ip.src)
                         dst_ip_str = "%d.%d.%d.%d" % tuple(ip.dst)
@@ -352,12 +344,31 @@ def extract_features(pcap_list, label, outdir, max_packets):
                         host["dst_ports"].append(dport)
                         host["dst_ips"].append(dst_ip_str)
 
+                        # --- BUFFER: LSTM Record ---
+                        lstm_row = [
+                            ts,
+                            src_ip_str,
+                            dport,
+                            ip.p,
+                            inter_arrival_time,
+                            frame_len,
+                            tcp_time_delta,
+                            tcp_syn,
+                            tcp_ack,
+                            tcp_fin,
+                            tcp_rst,
+                        ]
+                        lstm_records.append((flow_key, lstm_row))
+
                         # --- BUFFER: Autoencoder Record ---
                         # Convert explicit IP fragmentation flags to integers
                         ip_df = int(ip.df)
                         ip_mf = int(ip.mf)
                         ae_row = [
                             ts,
+                            src_ip_str,
+                            dport,
+                            ip.p,
                             frame_len,
                             ip.len,
                             ip.ttl,
@@ -375,7 +386,6 @@ def extract_features(pcap_list, label, outdir, max_packets):
                             icmp_code,
                             dns_resp_len,
                         ]
-                        # Store the raw packet features mapped to their source and flow IDs
                         ae_records.append((src_ip_str, flow_key, ae_row))
 
             except Exception as e:
@@ -428,12 +438,13 @@ def extract_features(pcap_list, label, outdir, max_packets):
 
                 iso_writer.writerow(
                     [
+                        stats["start_ts"],
                         key[0],
                         key[1],
                         key[2],
                         key[3],
                         key[4],
-                        stats["packets"],
+                        stats["packets"],  # flow_packet_count
                         stats["bytes"],
                         mean_size,
                         std_size,
@@ -448,17 +459,21 @@ def extract_features(pcap_list, label, outdir, max_packets):
                     ]
                 )
 
+            # --- WRITE: LSTM Records ---
+            for flow_key, lstm_row in lstm_records:
+                flow_stats = flows[flow_key]
+                lstm_row.append(flow_stats["packets"])  # flow_packet_count
+                lstm_writer.writerow(lstm_row)
+
             # --- WRITE: Autoencoder Records ---
-            # Unpack the buffered packet data and append the fully calculated flow/host metadata
             for src_ip, flow_key, ae_row in ae_records:
                 flow_stats = flows[flow_key]
                 ae_row.extend(
                     [
-                        flow_stats["bytes"],  # flow_bytes_total (Context from Tier 1)
-                        flow_stats["duration"],  # flow_duration (Context from Tier 1)
-                        host_entropies[src_ip][
-                            "dport_ent"
-                        ],  # dst_port_entropy (Context from Tier 2)
+                        flow_stats["bytes"],  # flow_bytes_total
+                        flow_stats["duration"],  # flow_duration
+                        host_entropies[src_ip]["dport_ent"],  # dst_port_entropy
+                        flow_stats["packets"],  # flow_packet_count
                     ]
                 )
                 ae_writer.writerow(ae_row)
