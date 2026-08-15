@@ -1,8 +1,8 @@
 """
 Script 8: ML Feature Extraction for Anomaly Detection
 
-Reads PCAP files and compiles 3 CSVs containing extracted features
-for Isolation Forest, LSTM, and Autoencoder models.
+Reads PCAP files using a parallelized two-pass stream to compile a single CSV 
+containing combined extracted features for Isolation Forest, LSTM, and Autoencoder models.
 
 Usage Instructions:
     Run the script from the terminal, providing the paths to your PCAP files.
@@ -24,17 +24,20 @@ import os
 import gzip
 import csv
 import math
+import shutil
+import tempfile
+import concurrent.futures
+import gc
 from collections import defaultdict
 import dpkt
 
 
 def parse_args():
     """
-    Parses CLI arguments to support processing two distinct datasets (e.g., baseline vs. test).
-    Allows for configurable packet limits to facilitate rapid testing before full processing.
+    Parses CLI arguments and enforces strict, conservative CPU limits.
     """
     parser = argparse.ArgumentParser(
-        description="Extract ML features from PCAPs for two datasets"
+        description="Extract ML features from PCAPs using safe multi-core processing"
     )
     parser.add_argument(
         "-p1", "--pcap1", nargs="+", required=True, help="Paths to Dataset 1 PCAPs"
@@ -43,40 +46,38 @@ def parse_args():
         "-p2", "--pcap2", nargs="+", required=True, help="Paths to Dataset 2 PCAPs"
     )
     parser.add_argument(
-        "-l1",
-        "--label1",
-        default="Dataset_1",
-        help="Label for Dataset 1 (used for file naming)",
+        "-l1", "--label1", default="Dataset_1", help="Label for Dataset 1"
     )
     parser.add_argument(
-        "-l2",
-        "--label2",
-        default="Dataset_2",
-        help="Label for Dataset 2 (used for file naming)",
+        "-l2", "--label2", default="Dataset_2", help="Label for Dataset 2"
     )
     parser.add_argument("-o", "--outdir", default="output_ml", help="Output directory")
     parser.add_argument(
         "-n", "--max-packets", type=int, default=1000000, help="Max packets per file"
     )
+
+    # Strict Limit: Use at most half the cores, and never more than 4 by default.
+    total_cores = os.cpu_count() or 4
+    safe_cores = max(1, min(4, total_cores // 2))
+
+    parser.add_argument(
+        "-w",
+        "--workers",
+        type=int,
+        default=safe_cores,
+        help=f"Number of concurrent CPU workers. Safely defaulted to {safe_cores}.",
+    )
+
     return parser.parse_args()
 
 
 def open_pcap(file_path):
-    """
-    Safely opens a PCAP file by checking its magic bytes.
-    Automatically handles gzipped files (magic b"\x1f\x8b") from the Merit network telescope.
-    """
     with open(file_path, "rb") as f:
         magic = f.read(2)
     return gzip.open(file_path, "rb") if magic == b"\x1f\x8b" else open(file_path, "rb")
 
 
 def get_ipv4_packet(buf, datalink):
-    """
-    Extracts the IPv4 payload by resolving the link-layer encapsulation type.
-    Accounts for standard Ethernet, Linux Cooked Captures (SLL), and raw IP links.
-    Drops non-IPv4 traffic (e.g., IPv6, ARP) by returning None.
-    """
     try:
         if datalink == dpkt.pcap.DLT_EN10MB:
             eth = dpkt.ethernet.Ethernet(buf)
@@ -96,11 +97,6 @@ def get_ipv4_packet(buf, datalink):
 
 
 def calculate_entropy(data_list):
-    """
-    Calculates the Shannon Entropy for a given list of values (e.g., destination ports).
-    A high entropy value indicates high diversity (e.g., a bot scanning many random ports).
-    A low entropy value indicates focused targeting (e.g., repeatedly hitting port 502).
-    """
     if not data_list:
         return 0.0
     freq = {}
@@ -113,173 +109,182 @@ def calculate_entropy(data_list):
     return entropy
 
 
-def extract_features(pcap_list, label, outdir, max_packets):
+def process_single_pcap(pcap_file, max_packets, temp_dir):
     """
-    Core extraction logic applied to a single list of PCAP files.
-    Generates three distinct CSVs optimized for three different ML architectures.
+    Worker function executed independently by a CPU core.
     """
+    if hasattr(os, "nice"):
+        try:
+            os.nice(10)
+        except AttributeError:
+            pass
 
-    # Establish clean file paths using the provided dataset label
-    file_prefix = label.replace(" ", "_")
-    iso_csv_path = os.path.join(outdir, f"{file_prefix}_isolation_forest_features.csv")
-    lstm_csv_path = os.path.join(outdir, f"{file_prefix}_lstm_features.csv")
-    ae_csv_path = os.path.join(outdir, f"{file_prefix}_autoencoder_features.csv")
+    base_name = os.path.basename(pcap_file)
+    temp_csv_path = os.path.join(temp_dir, f"{base_name}.tmp.csv")
 
-    # --- Header Definitions ---
-    # Isolation Forest looks for statistically unusual flows (aggregated connection metrics)
-    iso_headers = [
-        "timestamp",
-        "src_ip",
-        "dst_ip",
-        "src_port",
-        "dst_port",
-        "proto",
-        "flow_packet_count",
-        "flow_bytes_total",
-        "flow_mean_pkt_size",
-        "flow_std_pkt_size",
-        "flow_duration",
-        "bytes_per_second",
-        "syn_ratio",
-        "rst_ratio",
-        "dst_port_entropy",
-        "dst_ip_entropy",
-        "avg_ip_ttl",
-        "avg_tcp_window_size",
-    ]
+    # Force real-time logging to the terminal by disabling output buffering
+    print(f"    [~] Worker started: {base_name}", flush=True)
 
-    # LSTM evaluates time-ordered sequences to detect abnormal pacing/burstiness
-    lstm_headers = [
-        "timestamp",
-        "src_ip",
-        "dst_port",
-        "proto",
-        "inter_arrival_time",
-        "frame_len",
-        "tcp_time_delta",
-        "tcp_flags_syn",
-        "tcp_flags_ack",
-        "tcp_flags_fin",
-        "tcp_flags_rst",
-        "flow_packet_count",
-    ]
+    flows = defaultdict(
+        lambda: {
+            "packets": 0,
+            "bytes": 0,
+            "start_ts": None,
+            "end_ts": None,
+            "sizes": [],
+            "syn_count": 0,
+            "rst_count": 0,
+            "ttls": [],
+            "windows": [],
+        }
+    )
+    hosts = defaultdict(lambda: {"dst_ports": [], "dst_ips": []})
 
-    # Autoencoder reconstructs numerical vectors per packet; poor reconstruction = anomaly
-    # Integrates both packet-level data and flow/host-level context
-    ae_headers = [
-        "timestamp",
-        "src_ip",
-        "dst_port",
-        "proto",
-        "frame_len",
-        "ip_len",
-        "ip_ttl",
-        "ip_flags_df",
-        "ip_flags_mf",
-        "tcp_flags_syn",
-        "tcp_flags_ack",
-        "tcp_flags_fin",
-        "tcp_flags_rst",
-        "tcp_flags_push",
-        "tcp_window_size",
-        "tcp_len",
-        "udp_length",
-        "icmp_type",
-        "icmp_code",
-        "dns_resp_len",
-        "flow_bytes_total",
-        "flow_duration",
-        "dst_port_entropy",
-        "flow_packet_count",
-    ]
+    # ==========================================
+    # PASS 1: BUILD LIGHTWEIGHT METRIC DICTIONARIES
+    # ==========================================
+    packets_this_file = 0
+    try:
+        with open_pcap(pcap_file) as f:
+            pcap = dpkt.pcap.Reader(f)
+            datalink = pcap.datalink()
 
-    with (
-        open(iso_csv_path, "w", newline="") as f_iso,
-        open(lstm_csv_path, "w", newline="") as f_lstm,
-        open(ae_csv_path, "w", newline="") as f_ae,
-    ):
-        iso_writer = csv.writer(f_iso)
-        lstm_writer = csv.writer(f_lstm)
-        ae_writer = csv.writer(f_ae)
+            for ts, buf in pcap:
+                if packets_this_file >= max_packets:
+                    break
+                if ts < 946684800:
+                    continue
 
-        # Write the headers to initialize the CSV structure
-        iso_writer.writerow(iso_headers)
-        lstm_writer.writerow(lstm_headers)
-        ae_writer.writerow(ae_headers)
+                packets_this_file += 1
+                ip = get_ipv4_packet(buf, datalink)
+                if not ip:
+                    continue
 
-        for pcap_file in pcap_list:
-            print(f"[*] Extracting features from {os.path.basename(pcap_file)}...")
+                frame_len = len(buf)
+                sport, dport = 0, 0
+                tcp_syn = tcp_rst = tcp_win = 0
 
-            # --- Two-Tiered Data Tracking Architecture ---
+                if ip.p == dpkt.ip.IP_PROTO_TCP:
+                    try:
+                        tcp = ip.data
+                        if isinstance(tcp, dpkt.tcp.TCP):
+                            sport, dport = tcp.sport, tcp.dport
+                            tcp_syn = 1 if (tcp.flags & dpkt.tcp.TH_SYN) else 0
+                            tcp_rst = 1 if (tcp.flags & dpkt.tcp.TH_RST) else 0
+                            tcp_win = tcp.win
+                    except Exception:
+                        pass
+                elif ip.p == dpkt.ip.IP_PROTO_UDP:
+                    try:
+                        udp = ip.data
+                        if isinstance(udp, dpkt.udp.UDP):
+                            sport, dport = udp.sport, udp.dport
+                    except Exception:
+                        pass
 
-            # Tier 1: Connection Flow Tracking (5-tuple)
-            # Aggregates metrics specific to a single connection session.
-            flows = defaultdict(
-                lambda: {
-                    "packets": 0,
-                    "bytes": 0,
-                    "start_ts": None,
-                    "end_ts": None,
-                    "sizes": [],
-                    "syn_count": 0,
-                    "rst_count": 0,
-                    "ttls": [],
-                    "windows": [],
-                }
-            )
+                src_ip_str = "%d.%d.%d.%d" % tuple(ip.src)
+                dst_ip_str = "%d.%d.%d.%d" % tuple(ip.dst)
+                flow_key = (src_ip_str, dst_ip_str, sport, dport, ip.p)
 
-            # Tier 2: Host Behavior Tracking (grouped solely by Source IP)
-            # Tracks macroscopic behavior of a single bot across ALL its connections
-            # to calculate accurate scanning entropy.
-            hosts = defaultdict(lambda: {"dst_ports": [], "dst_ips": []})
+                flow = flows[flow_key]
+                flow["packets"] += 1
+                flow["bytes"] += frame_len
+                flow["sizes"].append(frame_len)
+                flow["syn_count"] += tcp_syn
+                flow["rst_count"] += tcp_rst
+                flow["ttls"].append(ip.ttl)
+                if ip.p == dpkt.ip.IP_PROTO_TCP:
+                    flow["windows"].append(tcp_win)
+                if flow["start_ts"] is None:
+                    flow["start_ts"] = ts
+                flow["end_ts"] = ts
 
-            # Buffers to hold sequence/packet data in memory until the file finishes parsing.
-            # This allows us to append the final calculated flow totals (like flow_packet_count) to each packet vector.
-            ae_records = []
-            lstm_records = []
+                host = hosts[src_ip_str]
+                host["dst_ports"].append(dport)
+                host["dst_ips"].append(dst_ip_str)
 
-            # Time tracking variables for inter-arrival calculations
-            last_ts = None
-            last_tcp_ts = None
-            packets_this_file = 0
+    except Exception as e:
+        print(
+            f"    [-] Worker Warning: Pass 1 issue in {base_name}. Error: {e}",
+            flush=True,
+        )
 
-            try:
-                with open_pcap(pcap_file) as f:
-                    pcap = dpkt.pcap.Reader(f)
-                    datalink = pcap.datalink()
+    # --- POST-PASS 1: PRUNE INVALID FLOWS ---
+    host_entropies = {}
+    for src_ip, stats in hosts.items():
+        host_entropies[src_ip] = {
+            "dport_ent": calculate_entropy(stats["dst_ports"]),
+            "dip_ent": calculate_entropy(stats["dst_ips"]),
+        }
 
-                    for ts, buf in pcap:
-                        if packets_this_file >= max_packets:
-                            break
+    valid_flows = {}
+    for flow_key, stats in flows.items():
+        if (
+            stats["start_ts"] is None
+            or stats["end_ts"] is None
+            or stats["packets"] == 0
+        ):
+            continue
 
-                        # Filter out corrupted epoch 0 (1970) timestamps often found in raw datasets
-                        if ts < 946684800:
-                            continue
+        duration = stats["end_ts"] - stats["start_ts"]
+        stats["duration"] = max(duration, 0.0001)
+        stats["bps"] = stats["bytes"] / stats["duration"]
+        mean_size = sum(stats["sizes"]) / stats["packets"]
+        stats["mean_size"] = mean_size
+        variance = sum((x - mean_size) ** 2 for x in stats["sizes"]) / stats["packets"]
+        stats["std_size"] = math.sqrt(variance)
+        stats["syn_ratio"] = stats["syn_count"] / stats["packets"]
+        stats["rst_ratio"] = stats["rst_count"] / stats["packets"]
+        stats["avg_ttl"] = (
+            sum(stats["ttls"]) / len(stats["ttls"]) if stats["ttls"] else 0
+        )
+        stats["avg_win"] = (
+            sum(stats["windows"]) / len(stats["windows"]) if stats["windows"] else 0
+        )
 
-                        packets_this_file += 1
-                        ip = get_ipv4_packet(buf, datalink)
-                        if not ip:
-                            continue
+        valid_flows[flow_key] = stats
+    flows = valid_flows
 
-                        frame_len = len(buf)
-                        # Calculate global packet pacing (useful for detecting artificial scanner delays)
-                        inter_arrival_time = (ts - last_ts) if last_ts else 0.0
-                        last_ts = ts
+    # ==========================================
+    # PASS 2: STREAM WRITE COMBINED ROWS TO TEMP
+    # ==========================================
+    last_ts = last_tcp_ts = None
+    packets_this_file = 0
 
-                        # Transport layer initialization
-                        sport, dport = 0, 0
-                        tcp_syn = tcp_ack = tcp_fin = tcp_rst = tcp_push = 0
-                        tcp_win = tcp_len = udp_len = icmp_type = icmp_code = (
-                            dns_resp_len
-                        ) = 0
-                        tcp_time_delta = 0.0
+    try:
+        with open(temp_csv_path, "w", newline="") as f_out:
+            writer = csv.writer(f_out)
+            with open_pcap(pcap_file) as f:
+                pcap = dpkt.pcap.Reader(f)
+                datalink = pcap.datalink()
 
-                        # --- Parse TCP Traffic ---
-                        if ip.p == dpkt.ip.IP_PROTO_TCP:
-                            try:
-                                tcp = ip.data
+                for ts, buf in pcap:
+                    if packets_this_file >= max_packets:
+                        break
+                    if ts < 946684800:
+                        continue
+
+                    packets_this_file += 1
+                    ip = get_ipv4_packet(buf, datalink)
+                    if not ip:
+                        continue
+
+                    frame_len = len(buf)
+                    inter_arrival_time = (ts - last_ts) if last_ts else 0.0
+                    last_ts = ts
+
+                    sport, dport = 0, 0
+                    tcp_syn = tcp_ack = tcp_fin = tcp_rst = tcp_push = 0
+                    tcp_win = tcp_len = udp_len = icmp_type = icmp_code = (
+                        dns_resp_len
+                    ) = 0
+                    tcp_time_delta = 0.0
+
+                    if ip.p == dpkt.ip.IP_PROTO_TCP:
+                        try:
+                            tcp = ip.data
+                            if isinstance(tcp, dpkt.tcp.TCP):
                                 sport, dport = tcp.sport, tcp.dport
-                                # Extract specific control flags (indicative of scans, floods, or normal teardowns)
                                 tcp_syn = 1 if (tcp.flags & dpkt.tcp.TH_SYN) else 0
                                 tcp_ack = 1 if (tcp.flags & dpkt.tcp.TH_ACK) else 0
                                 tcp_fin = 1 if (tcp.flags & dpkt.tcp.TH_FIN) else 0
@@ -291,89 +296,61 @@ def extract_features(pcap_list, label, outdir, max_packets):
                                     (ts - last_tcp_ts) if last_tcp_ts else 0.0
                                 )
                                 last_tcp_ts = ts
-                            except:
-                                pass
-
-                        # --- Parse UDP Traffic ---
-                        elif ip.p == dpkt.ip.IP_PROTO_UDP:
-                            try:
-                                udp = ip.data
+                        except Exception:
+                            pass
+                    elif ip.p == dpkt.ip.IP_PROTO_UDP:
+                        try:
+                            udp = ip.data
+                            if isinstance(udp, dpkt.udp.UDP):
                                 sport, dport = udp.sport, udp.dport
                                 udp_len = udp.ulen
-                                # Check for DNS amplification/responses
                                 if sport == 53 or dport == 53:
                                     try:
                                         dns = dpkt.dns.DNS(udp.data)
                                         if dns.qr == dpkt.dns.DNS_R:
                                             dns_resp_len = len(udp.data)
-                                    except:
+                                    except Exception:
                                         pass
-                            except:
-                                pass
-
-                        # --- Parse ICMP Traffic ---
-                        elif ip.p == dpkt.ip.IP_PROTO_ICMP:
-                            try:
-                                icmp = ip.data
+                        except Exception:
+                            pass
+                    elif ip.p == dpkt.ip.IP_PROTO_ICMP:
+                        try:
+                            icmp = ip.data
+                            if isinstance(icmp, dpkt.icmp.ICMP):
                                 icmp_type = icmp.type
                                 icmp_code = icmp.code
-                            except:
-                                pass
+                        except Exception:
+                            pass
 
-                        # Generate unique identifiers for dictionary lookups
-                        src_ip_str = "%d.%d.%d.%d" % tuple(ip.src)
-                        dst_ip_str = "%d.%d.%d.%d" % tuple(ip.dst)
-                        flow_key = (src_ip_str, dst_ip_str, sport, dport, ip.p)
+                    src_ip_str = "%d.%d.%d.%d" % tuple(ip.src)
+                    dst_ip_str = "%d.%d.%d.%d" % tuple(ip.dst)
+                    flow_key = (src_ip_str, dst_ip_str, sport, dport, ip.p)
 
-                        # --- UPDATE TIER 1: Flow Stats ---
-                        flow = flows[flow_key]
-                        flow["packets"] += 1
-                        flow["bytes"] += frame_len
-                        flow["sizes"].append(frame_len)
-                        flow["syn_count"] += tcp_syn
-                        flow["rst_count"] += tcp_rst
-                        flow["ttls"].append(ip.ttl)
-                        if ip.p == dpkt.ip.IP_PROTO_TCP:
-                            flow["windows"].append(tcp_win)
-                        if flow["start_ts"] is None:
-                            flow["start_ts"] = ts
-                        flow["end_ts"] = ts
+                    if flow_key not in flows:
+                        continue
 
-                        # --- UPDATE TIER 2: Host (Source IP) Stats ---
-                        host = hosts[src_ip_str]
-                        host["dst_ports"].append(dport)
-                        host["dst_ips"].append(dst_ip_str)
+                    flow_stats = flows[flow_key]
+                    host_stats = host_entropies.get(
+                        src_ip_str, {"dport_ent": 0.0, "dip_ent": 0.0}
+                    )
+                    ip_df = int(ip.df)
+                    ip_mf = int(ip.mf)
 
-                        # --- BUFFER: LSTM Record ---
-                        lstm_row = [
+                    writer.writerow(
+                        [
                             ts,
                             src_ip_str,
+                            dst_ip_str,
+                            sport,
                             dport,
                             ip.p,
                             inter_arrival_time,
-                            frame_len,
-                            tcp_time_delta,
-                            tcp_syn,
-                            tcp_ack,
-                            tcp_fin,
-                            tcp_rst,
-                        ]
-                        lstm_records.append((flow_key, lstm_row))
-
-                        # --- BUFFER: Autoencoder Record ---
-                        # Convert explicit IP fragmentation flags to integers
-                        ip_df = int(ip.df)
-                        ip_mf = int(ip.mf)
-                        ae_row = [
-                            ts,
-                            src_ip_str,
-                            dport,
-                            ip.p,
                             frame_len,
                             ip.len,
                             ip.ttl,
                             ip_df,
                             ip_mf,
+                            tcp_time_delta,
                             tcp_syn,
                             tcp_ack,
                             tcp_fin,
@@ -385,115 +362,132 @@ def extract_features(pcap_list, label, outdir, max_packets):
                             icmp_type,
                             icmp_code,
                             dns_resp_len,
+                            flow_stats["packets"],
+                            flow_stats["bytes"],
+                            flow_stats["duration"],
+                            flow_stats["mean_size"],
+                            flow_stats["std_size"],
+                            flow_stats["bps"],
+                            flow_stats["syn_ratio"],
+                            flow_stats["rst_ratio"],
+                            host_stats["dport_ent"],
+                            host_stats["dip_ent"],
+                            flow_stats["avg_ttl"],
+                            flow_stats["avg_win"],
                         ]
-                        ae_records.append((src_ip_str, flow_key, ae_row))
+                    )
 
-            except Exception as e:
-                print(f"[-] Error parsing {pcap_file}: {e}")
+    except Exception as e:
+        print(
+            f"    [-] Worker Warning: Pass 2 issue in {base_name}. Error: {e}",
+            flush=True,
+        )
+        return None
 
-            # --- POST-PROCESSING: PRE-CALCULATE ENTROPY FOR EACH HOST ---
-            # Now that the file is fully read, evaluate the diversity of each bot's targeting
-            host_entropies = {}
-            for src_ip, stats in hosts.items():
-                host_entropies[src_ip] = {
-                    "dport_ent": calculate_entropy(stats["dst_ports"]),
-                    "dip_ent": calculate_entropy(stats["dst_ips"]),
-                }
+    # Aggressively release memory before returning to the worker pool
+    del flows
+    del hosts
+    del valid_flows
+    gc.collect()
 
-            # --- WRITE: Isolation Forest Records ---
-            for key, stats in flows.items():
-                src_ip = key[0]
+    # Flush the success message so it appears immediately
+    print(f"    [+] Worker finished: {base_name}", flush=True)
+    return temp_csv_path
 
-                # Calculate flow duration (enforce minimum to prevent division by zero)
-                duration = stats["end_ts"] - stats["start_ts"]
-                duration = max(duration, 0.0001)
 
-                stats["duration"] = duration
+def extract_features(pcap_list, label, outdir, max_packets, max_workers):
+    """
+    Manages the multiprocessing pool and combines the temp files into the final dataset.
+    """
+    file_prefix = label.replace(" ", "_")
+    combined_csv_path = os.path.join(outdir, f"{file_prefix}_combined_features.csv")
 
-                # Calculate statistical profiles of the flow
-                bps = stats["bytes"] / duration
-                mean_size = sum(stats["sizes"]) / stats["packets"]
-                variance = (
-                    sum((x - mean_size) ** 2 for x in stats["sizes"]) / stats["packets"]
-                )
-                std_size = math.sqrt(variance)
+    combined_headers = [
+        "timestamp",
+        "src_ip",
+        "dst_ip",
+        "src_port",
+        "dst_port",
+        "proto",
+        "inter_arrival_time",
+        "frame_len",
+        "ip_len",
+        "ip_ttl",
+        "ip_flags_df",
+        "ip_flags_mf",
+        "tcp_time_delta",
+        "tcp_flags_syn",
+        "tcp_flags_ack",
+        "tcp_flags_fin",
+        "tcp_flags_rst",
+        "tcp_flags_push",
+        "tcp_window_size",
+        "tcp_len",
+        "udp_length",
+        "icmp_type",
+        "icmp_code",
+        "dns_resp_len",
+        "flow_packet_count",
+        "flow_bytes_total",
+        "flow_duration",
+        "flow_mean_pkt_size",
+        "flow_std_pkt_size",
+        "bytes_per_second",
+        "syn_ratio",
+        "rst_ratio",
+        "dst_port_entropy",
+        "dst_ip_entropy",
+        "avg_ip_ttl",
+        "avg_tcp_window_size",
+    ]
 
-                # Determine ratio of connection establishment (SYN) vs teardown/rejection (RST)
-                syn_ratio = stats["syn_count"] / stats["packets"]
-                rst_ratio = stats["rst_count"] / stats["packets"]
+    with tempfile.TemporaryDirectory() as temp_dir:
+        valid_temp_files = []
 
-                # Compute average network hops and window sizes
-                avg_ttl = (
-                    sum(stats["ttls"]) / len(stats["ttls"]) if stats["ttls"] else 0
-                )
-                avg_win = (
-                    sum(stats["windows"]) / len(stats["windows"])
-                    if stats["windows"]
-                    else 0
-                )
+        print(
+            f"\n[*] Spinning up {max_workers} safe background workers to process {label}..."
+        )
 
-                # Fetch the Tier 2 behavioral entropy mapped to this specific source IP
-                dport_ent = host_entropies[src_ip]["dport_ent"]
-                dip_ent = host_entropies[src_ip]["dip_ent"]
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_workers
+        ) as executor:
+            futures = {
+                executor.submit(process_single_pcap, pcap, max_packets, temp_dir): pcap
+                for pcap in pcap_list
+            }
 
-                iso_writer.writerow(
-                    [
-                        stats["start_ts"],
-                        key[0],
-                        key[1],
-                        key[2],
-                        key[3],
-                        key[4],
-                        stats["packets"],  # flow_packet_count
-                        stats["bytes"],
-                        mean_size,
-                        std_size,
-                        duration,
-                        bps,
-                        syn_ratio,
-                        rst_ratio,
-                        dport_ent,
-                        dip_ent,
-                        avg_ttl,
-                        avg_win,
-                    ]
-                )
+            for future in concurrent.futures.as_completed(futures):
+                result_path = future.result()
+                if result_path and os.path.exists(result_path):
+                    valid_temp_files.append(result_path)
 
-            # --- WRITE: LSTM Records ---
-            for flow_key, lstm_row in lstm_records:
-                flow_stats = flows[flow_key]
-                lstm_row.append(flow_stats["packets"])  # flow_packet_count
-                lstm_writer.writerow(lstm_row)
+        print(
+            f"[*] Aggregating {len(valid_temp_files)} threads into {combined_csv_path}..."
+        )
+        with open(combined_csv_path, "wb") as f_out:
+            header_line = ",".join(combined_headers) + "\n"
+            f_out.write(header_line.encode("utf-8"))
 
-            # --- WRITE: Autoencoder Records ---
-            for src_ip, flow_key, ae_row in ae_records:
-                flow_stats = flows[flow_key]
-                ae_row.extend(
-                    [
-                        flow_stats["bytes"],  # flow_bytes_total
-                        flow_stats["duration"],  # flow_duration
-                        host_entropies[src_ip]["dport_ent"],  # dst_port_entropy
-                        flow_stats["packets"],  # flow_packet_count
-                    ]
-                )
-                ae_writer.writerow(ae_row)
+            for t_file in valid_temp_files:
+                with open(t_file, "rb") as f_in:
+                    shutil.copyfileobj(f_in, f_out)
 
-    print(f"[+] Feature extraction complete for {label}. Results saved in {outdir}/")
+    print(f"[+] Feature extraction complete for {label}. Results saved.")
 
 
 def main():
-    """
-    Main execution block.
-    Triggers the feature extraction sequentially for both comparative datasets.
-    """
     args = parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
-    print(f"--- Extracting ML Features for {args.label1} ---")
-    extract_features(args.pcap1, args.label1, args.outdir, args.max_packets)
+    print("--- Safe Parallel ML Feature Extraction Started ---")
+    print(f"[*] Hardware Limit: Restricted to {args.workers} CPU Cores")
 
-    print(f"\n--- Extracting ML Features for {args.label2} ---")
-    extract_features(args.pcap2, args.label2, args.outdir, args.max_packets)
+    extract_features(
+        args.pcap1, args.label1, args.outdir, args.max_packets, args.workers
+    )
+    extract_features(
+        args.pcap2, args.label2, args.outdir, args.max_packets, args.workers
+    )
 
 
 if __name__ == "__main__":

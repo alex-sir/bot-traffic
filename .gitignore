@@ -11,3 +11,7 @@ data/
 # Output files (.csv, .png, etc)
 output/
 analysis_results/
+
+# Log files
+copy_pcaps.log
+yearly_analysis.log
